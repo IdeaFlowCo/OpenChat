@@ -12,6 +12,7 @@ import { processLinkPreviews } from '../services/linkPreview.js';
 import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMessage.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
+import { maybeTriggerThreadAgent } from '../services/threadAgent.js';
 import { MESSAGE_ID_BELONGS_TO_SEND, MESSAGE_ID_IN_USE, parseClientMessageId } from '../services/messageId.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { resolveMentionedUserIds } from '../services/messageMentions.js';
@@ -376,6 +377,14 @@ export function setupChatSocket(io: Server): void {
           content,
           io,
         });
+        // "@agent" tag: the sender's own built-in agent answers about this thread (openchat-6zn).
+        // Sockets carry signed-in sessions only; embedded partner sessions cannot spend an agent budget.
+        if (wasCreated && typeof content === 'string') {
+          void maybeTriggerThreadAgent({
+            driver: getDriver(), io, senderId: userId, conversationId, messageId, content,
+            human: !socket.user?.embedded, broadcast: broadcastMessageToParticipants,
+          });
+        }
 
         // Fan-out push notifications to all OTHER participants. Fire-and-forget;
         // never block the message:send response on push delivery.

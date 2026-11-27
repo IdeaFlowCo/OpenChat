@@ -38,7 +38,7 @@ it('removes every link form a client could linkify unless the owner wrote exactl
   const shared: ShareableContext = { ...ctx, profile: { headline: null, status: null, links: ['https://example.com/jacob'] }, sharedNotes: [{ text: 'Folder: docs.example.org/team', status: null }] };
   const clean = (s: string) => sanitizeAgentReply(s, shared);
   expect(clean('Verify at jacob-pay.com/login now')).toBe('Verify at [link removed] now');
-  expect(clean('See [here](evil.com/x)')).toBe('See [here]([link removed])');
+  expect(clean('See [here](evil.com/x)')).toBe('See [here] ([link removed])');
   expect(clean('Try http:evil.com or //evil.com/x')).toBe('Try [link removed] or [link removed]');
   expect(clean('Go to ｈｔｔｐｓ://evil.example.test/x')).toBe('Go to [link removed]');
   expect(clean('Lookalike https://example.co please')).toBe('Lookalike [link removed] please');

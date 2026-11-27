@@ -57,9 +57,61 @@ Hold a message in the canonical client to open its actions.
     **$2 per month** cap from actual token usage (worst case reserved first), plus a global
     monthly ceiling (`OPENCHAT_PROFILE_AGENT_GLOBAL_MONTHLY_USD`, default 50). Rate
     limits: 10 asks per asker per hour, 5 per asker and owner, 40 per owner, and 2 per
-    message. Human sessions only (agent keys and connectors are refused).
+    message. Human sessions only (agent keys and connectors are refused). Like an ordinary
+    send, nothing is posted while the asker, or the owner the answer is stored under, and
+    anyone in the chat have blocked each other. Auto-reply drafts, which only the owner
+    sees, need only the owner and the sender not to have blocked each other.
   - **Model and key:** the existing `ANTHROPIC_API_KEY` and `ASSISTANT_MODEL`
     (default `claude-haiku-4-5`). `OPENCHAT_PROFILE_AGENT_ENABLED=false` is the kill switch.
+- **@agent / Ask my agent** (openchat-6zn): *your own* built-in agent answers
+  about the current thread, in that chat. Three doors, one service
+  (`services/threadAgent.ts`):
+  typing `@agent` anywhere in a message (the composer offers it when you type `@`
+  and says, before you send, that everyone in the chat will see the answer);
+  the chat's **⋯** menu › **Ask @agent in this chat**; and holding your own message ›
+  **Ask my agent** (`POST /api/chat/agent-reply {messageId, question?, agent:"mine"}`; the
+  API accepts any live message of a chat you are in, the app offers it on your own).
+  The answer is a reply to the tagged or selected message, stored with you as sender,
+  labelled `🤖 {you}'s OpenChat agent · not {you}` and `Asked by {you}`.
+  - **What it can read:** only what everyone in the chat can already read: the newest
+    40 live messages of that one conversation (600 characters each, 12,000 in total,
+    voice notes by transcript) under the senders' public names, plus the Stream items
+    and Context posts *you* shared there. Never private notes, the private people
+    graph, your private names for contacts, private message statuses, the private
+    assistant's page context, other chats, your card or account fields
+    (`loadThreadContext` is the only reader; `threadAgent.integration.test.ts` seeds
+    private canaries and asserts none reaches the model or the reply).
+  - **The tag:** `@agent` as its own word, case-insensitive. `@agents`, `@agent-smith`,
+    `@agent.example`, `name@agent.example` and lookalike characters are not tags. In a
+    chat where another participant's name is "Agent" or starts with "Agent ", the tag
+    stays that person's mention: the composer does not offer it, nothing runs, and the
+    sender is told to use **Ask my agent** instead. `@agent` alone means "catch me up".
+  - **Blocks:** like an ordinary send, nothing is read or posted while the asker and
+    anyone else in the chat have blocked each other (checked when asked and again when
+    posting).
+  - **Injection:** every message is another participant's untrusted text, passed as
+    JSON data. The model has no tools and at most 400 output tokens. Forged label lines are
+    and forged `Asked by` or official-sounding lines are removed. A link survives only if
+    *you* wrote it in this chat, so nobody can launder a link through your agent; other
+    links become `[link removed]`. A `scheme://` or `www.` address is compared as its whole
+    unbroken run, and `[label](address)` syntax is broken apart so an address is never
+    hidden behind a label. `threadAgent.unit.test.ts` feeds sanitised output through the
+    app's own linkifier and asserts nothing else becomes a link. What remains possible:
+    a participant can still get false *words* (not links) summarised, so the label says
+    agent, not you.
+  - **Consent and limits:** no standing opt-in, because each answer is your own explicit
+    act and spends your own **$2 per month** allowance (same meter and global ceiling as
+    above). Because nobody opts in, thread answers stop at 60% of the global monthly
+    ceiling; the rest stays for agents people turned on for others. 20 thread answers per
+    person per hour, 8 per chat per hour (4 for any one member), 2 per message (so a
+    retry or a second door can add a second answer). These limits are separate from
+    "Ask {name}'s agent": neither uses up the other's.
+    Signed-in people only: messages sent with an API key, a connector or an embedded
+    session never trigger it. Not in direct chats with a bot or in announcement chats.
+    The trigger never delays or fails the send; only the sender is told about progress
+    or a refusal (`agent-reply:status` on their own sockets, codes only).
+  - **Known limit:** an agent answer is a message of its own. Deleting a message it
+    summarised does not remove the answer; its sender can delete it like any message.
 - **Auto replies** (Chats → Profile → Auto replies, and Settings → Auto replies) keeps
   the existing opt-in Secretary (exact quick answers) and adds **auto-response rules**:
   when I'm away, from these people, about these words → reply with my text, or let

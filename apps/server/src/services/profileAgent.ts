@@ -66,7 +66,7 @@ export function globalMonthlyCapMicros(env: NodeJS.ProcessEnv = process.env): nu
 export const MAX_OUTPUT_TOKENS = 400;
 export const LIMITS = { askerPerHour: 10, askerOwnerPerHour: 5, ownerPerHour: 40, perMessage: 2 } as const;
 const MAX_REPLY_CHARS = 1200;
-const MAX_QUESTION_CHARS = 500;
+export const MAX_QUESTION_CHARS = 500;
 
 export const monthKey = (date = new Date()) => date.toISOString().slice(0, 7);
 
@@ -91,6 +91,9 @@ export async function loadShareableContext(
   input: { askerId: string; ownerId: string; conversationId: string; messageId: string },
   // All agent-written text needs the owner's explicit opt-in (one switch for asks and agent rules).
   requireOptIn = true,
+  // A person asking in the chat is refused, like a send, while they and anyone here have blocked each other.
+  // A draft for the owner's eyes only needs the owner and the sender not to have blocked each other.
+  refuseAnyBlock = false,
 ): Promise<ShareableContext> {
   // Copy only the identifiers so callers can never pass extra objects as query parameters.
   input = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
@@ -107,6 +110,8 @@ export async function loadShareableContext(
       owner.profileStatusText AS statusText, owner.profileStatusEmoji AS statusEmoji,
       asker.name AS askerName, coalesce(asker.isBot,false) AS askerIsBot,
       EXISTS { MATCH (owner)-[:BLOCKED]-(asker) } AS blocked,
+      // Anchored on the asker's few block edges, not on every member of a large chat.
+      EXISTS { MATCH (asker)-[:BLOCKED]-(:User)-[:PARTICIPATES_IN]->(c) } AS blockedHere,
       m.content AS text, m.senderId AS senderId, sender.name AS senderName,
       coalesce(m.viaProfileAgent,false) OR coalesce(m.viaAutoResponse,false) OR coalesce(m.viaSecretary,false) AS automatic,
       head(collect(properties(card))) AS card
@@ -114,7 +119,7 @@ export async function loadShareableContext(
   const row = base.records[0];
   if (!row) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (row.get('ownerIsBot') || row.get('askerIsBot')) throw new ProfileAgentError(400, 'bot', 'Agents can only be asked about people');
-  if (row.get('blocked')) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
+  if (row.get('blocked') || (refuseAnyBlock && row.get('blockedHere'))) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (requireOptIn && !row.get('enabled')) throw new ProfileAgentError(409, 'off', 'This person has not turned on their OpenChat agent');
   if (row.get('automatic')) throw new ProfileAgentError(400, 'automatic', 'Agents do not answer automatic replies');
 
@@ -126,6 +131,32 @@ export async function loadShareableContext(
   );
   const status = card.status ? [card.status.emoji, card.status.text].filter(Boolean).join(' ') : null;
 
+  const shared = await loadOwnerSharedInChat(tx, input);
+  return {
+    ownerId: input.ownerId,
+    ownerName,
+    askerName: safeName(row.get('askerName')),
+    conversationId: input.conversationId,
+    profile: { headline: card.headline, status, links: [card.linkedIn, card.x, card.link].filter((v): v is string => !!v) },
+    ...shared,
+    message: {
+      id: input.messageId,
+      text: String(row.get('text') ?? '').slice(0, 4000),
+      senderName: safeName(row.get('senderName')),
+      fromOwner: row.get('senderId') === input.ownerId,
+    },
+  };
+}
+
+/**
+ * What the owner wrote and shared into this conversation: their pinned Stream
+ * items and, when the reader may read Context here, their Context posts.
+ */
+export async function loadOwnerSharedInChat(
+  tx: ManagedTransaction,
+  input: { askerId: string; ownerId: string; conversationId: string },
+): Promise<Pick<ShareableContext, 'sharedNotes' | 'contextPosts'>> {
+  input = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId };
   const notes = await tx.run(`
     MATCH (t:Thought {userId:$ownerId})-[p:PINNED_IN]->(:Conversation {id:$conversationId})
     WHERE t.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
@@ -145,25 +176,14 @@ export async function loadShareableContext(
     contextPosts = posts.records.map(r => String(r.get('text'))).filter(Boolean);
   }
   return {
-    ownerId: input.ownerId,
-    ownerName,
-    askerName: safeName(row.get('askerName')),
-    conversationId: input.conversationId,
-    profile: { headline: card.headline, status, links: [card.linkedIn, card.x, card.link].filter((v): v is string => !!v) },
     sharedNotes: notes.records.map(r => ({ text: String(r.get('text')), status: r.get('status') ?? null })).filter(n => n.text),
     contextPosts,
-    message: {
-      id: input.messageId,
-      text: String(row.get('text') ?? '').slice(0, 4000),
-      senderName: safeName(row.get('senderName')),
-      fromOwner: row.get('senderId') === input.ownerId,
-    },
   };
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 export interface AgentPrompt { system: string; user: string }
-export type AgentPurpose = 'answer' | 'auto-draft';
+export type AgentPurpose = 'answer' | 'auto-draft' | 'thread';
 
 export function buildAgentPrompt(ctx: ShareableContext, question: string | undefined, purpose: AgentPurpose = 'answer'): AgentPrompt {
   // Names are participant-controlled: only ever quoted, single-line and bounded (safeName).
@@ -206,8 +226,12 @@ export function safeName(raw: unknown): string {
  * Anything a client might turn into a link: schemes, scheme-less //, www., and
  * bare domains with any 2+ letter ending (a superset of the client linkifier).
  */
-const LINK_CANDIDATE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'“”‘’`]+|(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
-const normalizeLink = (link: string) => link.replace(/[.,;:!?)\]]+$/, '').replace(/^[a-z][a-z0-9+.-]*:\/*|^\/\//i, '').replace(/^www\./i, '').toLowerCase();
+// A scheme:// or www. address is taken as its whole unbroken run, with the same stop characters as the
+// client (apps/mobile/src/utils/messageLinks.ts), so a host with non-ASCII labels, or an allowed
+// address with more host appended ("www.good.example.evil"), is one candidate and is compared whole.
+export const LINK_CANDIDATE = /(?:\b[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"“”‘’`]+|(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
+// Only a web scheme is dropped before comparing: "other://host/x" never equals the owner's "host/x".
+export const normalizeLink = (link: string) => link.replace(/[.,;:!?)\]}'…]+$/, '').replace(/^(?:https?:)?\/\//i, '').replace(/^www\./i, '').toLowerCase();
 /** Links found in text the owner wrote and shared here. */
 export function ownerLinks(ctx: ShareableContext): Set<string> {
   const sources = [...ctx.profile.links, ...ctx.sharedNotes.map(n => n.text), ...ctx.contextPosts, ctx.message.fromOwner ? ctx.message.text : ''];
@@ -216,20 +240,37 @@ export function ownerLinks(ctx: ShareableContext): Set<string> {
   return found;
 }
 
-export function sanitizeAgentReply(raw: string, ctx: ShareableContext): string {
+export function sanitizeAgentReply(
+  raw: string, ctx: ShareableContext, allowed: Set<string> = ownerLinks(ctx),
+  // What to say when hygiene leaves nothing (e.g. the reply was only a self-introduction line).
+  fallback = `${safeName(ctx.ownerName)} has not shared anything about that here. They can reply themselves.`,
+): string {
   // Links may only repeat, exactly, a link the owner wrote; an asker cannot launder one through someone else's agent.
-  const allowed = ownerLinks(ctx);
   let text = cleanText(raw).trim();
-  // Never let the model forge the trusted label or an author line, quoted or not.
-  text = text.split('\n').filter(line => !/🤖|openchat\s*agent|automatic\s*reply|drafted\s+by/i.test(line)).join('\n').trim();
-  text = text.replace(LINK_CANDIDATE, link => allowed.has(normalizeLink(link)) ? link : '[link removed]');
+  // Never let the model forge the trusted label, the "Asked by" line or an official-sounding author line, quoted or not.
+  text = text.split('\n').filter(line => !/🤖|open[\s-]*chat\s*(?:agent|security|support|team|staff)|automatic\s*reply|drafted\s+by|^\W*asked\s+by\b/i.test(line)).join('\n').trim();
   const quoted = text.match(/^["“](.*)["”]$/s);
   if (quoted) text = quoted[1]!.trim();
   text = text.replace(/\n{3,}/g, '\n\n');
-  // If hygiene removed everything (e.g. only a self-introduction line), say the honest default.
-  if (!text) text = `${safeName(ctx.ownerName)} has not shared anything about that here. They can reply themselves.`;
-  if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS - 1).trimEnd()}…`;
+  // Links are judged on text that is already cut to length, so a link shortened by the cut is judged as
+  // shortened and never kept as a different host. "[label](address)" would show only the label: the syntax
+  // is broken after the replacement, so "[link removed]" can never become a label itself.
+  const judge = (value: string) => value
+    .replace(LINK_CANDIDATE, link => allowed.has(normalizeLink(link)) ? link : '[link removed]')
+    .replace(/\]\(/g, '] (');
+  text = judge(clipReply(text));
+  // Replacing a link can lengthen the text. Every further cut is judged again; nothing cut is ever returned unjudged.
+  for (let round = 0; text.length > MAX_REPLY_CHARS && round < 4; round++) text = judge(clipReply(text));
+  // If hygiene removed everything (or the text never settled), say the honest default. Names are participant-chosen: judge it too.
+  if (!text || text.length > MAX_REPLY_CHARS) text = judge(fallback).slice(0, MAX_REPLY_CHARS);
   return text;
+}
+function clipReply(text: string): string {
+  if (text.length <= MAX_REPLY_CHARS) return text;
+  const cut = text.slice(0, MAX_REPLY_CHARS - 1);
+  const space = cut.search(/\s\S*$/);
+  // Prefer the last word boundary when one is near; unbroken text is cut where it stands.
+  return `${(space > MAX_REPLY_CHARS - 200 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 export const agentLabel = (ownerName: string) => { const name = safeName(ownerName); return `🤖 ${name}'s OpenChat agent · not ${name}`; };
@@ -256,13 +297,14 @@ export function reservationMicros(model: string, prompt: AgentPrompt): number {
 // ── Budget and rate limits (durable, transactional) ─────────────────────────
 export async function checkRateLimits(tx: ManagedTransaction, input: { askerId: string; ownerId: string; messageId: string; now: string }) {
   const r = await tx.run(`
-    OPTIONAL MATCH (a:ProfileAgentRun {askerId:$askerId}) WHERE a.createdAt > datetime($now) - duration('PT1H')
+    // A person's own @agent answers (purpose 'thread') have their own limits and never count here.
+    OPTIONAL MATCH (a:ProfileAgentRun {askerId:$askerId}) WHERE a.createdAt > datetime($now) - duration('PT1H') AND coalesce(a.purpose,'answer') <> 'thread'
     WITH count(a) AS asker
-    OPTIONAL MATCH (p:ProfileAgentRun {askerId:$askerId, ownerId:$ownerId}) WHERE p.createdAt > datetime($now) - duration('PT1H')
+    OPTIONAL MATCH (p:ProfileAgentRun {askerId:$askerId, ownerId:$ownerId}) WHERE p.createdAt > datetime($now) - duration('PT1H') AND coalesce(p.purpose,'answer') <> 'thread'
     WITH asker, count(p) AS pair
-    OPTIONAL MATCH (o:ProfileAgentRun {ownerId:$ownerId}) WHERE o.createdAt > datetime($now) - duration('PT1H')
+    OPTIONAL MATCH (o:ProfileAgentRun {ownerId:$ownerId}) WHERE o.createdAt > datetime($now) - duration('PT1H') AND coalesce(o.purpose,'answer') <> 'thread'
     WITH asker, pair, count(o) AS owner
-    OPTIONAL MATCH (m:ProfileAgentRun {askerId:$askerId, ownerId:$ownerId, messageId:$messageId})
+    OPTIONAL MATCH (m:ProfileAgentRun {askerId:$askerId, ownerId:$ownerId, messageId:$messageId}) WHERE coalesce(m.purpose,'answer') <> 'thread'
     RETURN asker, pair, owner, count(m) AS perMessage
   `, input);
   const row = r.records[0]!;
@@ -273,12 +315,17 @@ export async function checkRateLimits(tx: ManagedTransaction, input: { askerId: 
 }
 
 export async function checkOwnerRate(tx: ManagedTransaction, input: { ownerId: string; now: string }) {
-  const r = await tx.run(`OPTIONAL MATCH (o:ProfileAgentRun {ownerId:$ownerId}) WHERE o.createdAt > datetime($now) - duration('PT1H') RETURN count(o) AS n`, input);
+  const r = await tx.run(`OPTIONAL MATCH (o:ProfileAgentRun {ownerId:$ownerId}) WHERE o.createdAt > datetime($now) - duration('PT1H') AND coalesce(o.purpose,'answer') <> 'thread' RETURN count(o) AS n`, input);
   if (Number(r.records[0]?.get('n')?.toNumber?.() ?? 0) >= LIMITS.ownerPerHour) throw new ProfileAgentError(429, 'rate', 'This agent is busy. Try again later.');
 }
 
 /** Reserve worst-case spend against the owner's $2/month and the global monthly cap. */
-export async function reserveBudget(tx: ManagedTransaction, input: { ownerId: string; micros: number; month: string }) {
+export async function reserveBudget(tx: ManagedTransaction, input: {
+  ownerId: string; micros: number; month: string;
+  /** Part of the global ceiling this spend may reach (0–1). The rest stays for owners who opted in. */
+  globalShare?: number;
+}) {
+  const params = { ownerId: input.ownerId, micros: input.micros, month: input.month };
   const r = await tx.run(`
     MATCH (owner:User {id:$ownerId})
     MERGE (g:ProfileAgentBudget {id:'global'})
@@ -288,20 +335,22 @@ export async function reserveBudget(tx: ManagedTransaction, input: { ownerId: st
       CASE WHEN owner.profileAgentMonth = $month THEN coalesce(owner.profileAgentSpentMicros,0) ELSE 0 END AS ownerSpent,
       CASE WHEN g.month = $month THEN coalesce(g.spentMicros,0) ELSE 0 END AS globalSpent
     RETURN ownerSpent, globalSpent
-  `, input);
+  `, params);
   const row = r.records[0];
   if (!row) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   const ownerSpent = Number(row.get('ownerSpent')?.toNumber?.() ?? row.get('ownerSpent'));
   const globalSpent = Number(row.get('globalSpent')?.toNumber?.() ?? row.get('globalSpent'));
   if (ownerSpent + input.micros > OWNER_MONTHLY_CAP_MICROS) throw new ProfileAgentError(429, 'cap', 'This agent has used its monthly allowance. Try again next month.');
-  if (globalSpent + input.micros > globalMonthlyCapMicros()) throw new ProfileAgentError(503, 'cap', 'OpenChat agents are resting for the rest of this month.');
+  const share = typeof input.globalShare === 'number' && input.globalShare > 0 && input.globalShare < 1 ? input.globalShare : 1;
+  // 'resting', not 'cap': this is the service's ceiling, not this person's allowance.
+  if (globalSpent + input.micros > globalMonthlyCapMicros() * share) throw new ProfileAgentError(503, 'resting', 'OpenChat agents are resting for the rest of this month.');
   await tx.run(`
     MATCH (owner:User {id:$ownerId}), (g:ProfileAgentBudget {id:'global'})
     SET owner.profileAgentSpentMicros = CASE WHEN owner.profileAgentMonth = $month THEN coalesce(owner.profileAgentSpentMicros,0) ELSE 0 END + $micros,
         owner.profileAgentMonth = $month,
         g.spentMicros = CASE WHEN g.month = $month THEN coalesce(g.spentMicros,0) ELSE 0 END + $micros,
         g.month = $month
-  `, input);
+  `, params);
 }
 
 /** Replace a reservation with the actual cost (delta may be negative). */
@@ -336,6 +385,14 @@ export interface MeteredInput {
   /** Rate limits apply to people asking; auto-drafts are bounded by their own cooldown. */
   rateLimited: boolean;
   generate?: ProfileAgentGenerator;
+  /**
+   * Replaces the default reader and prompt (the thread agent). Runs inside the
+   * reservation transaction, after the ACL locks, and must do its own
+   * eligibility and rate checks. `allowedLinks` are the only links the reply may keep.
+   */
+  prepare?: (tx: ManagedTransaction, now: string) => Promise<{ ctx: ShareableContext; prompt: AgentPrompt; allowedLinks: Set<string>; emptyReply: string }>;
+  /** See reserveBudget. */
+  globalShare?: number;
 }
 export interface MeteredReply { runId: string; ctx: ShareableContext; text: string; costMicros: number }
 
@@ -348,25 +405,29 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
   let reserved = 0;
   let ctx: ShareableContext;
   let prompt: AgentPrompt;
+  let allowedLinks: Set<string> | undefined;
+  let emptyReply: string | undefined;
   try {
-    ({ ctx, prompt, reserved } = await session.executeWrite(async tx => {
+    ({ ctx, prompt, reserved, allowedLinks, emptyReply } = await session.executeWrite(async tx => {
       await acquireContextAclLocks(tx, { userIds: [input.ownerId, input.askerId] });
       const now = new Date().toISOString();
       const ids = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
-      const context = await loadShareableContext(tx, ids, true);
+      const prepared = input.prepare ? await input.prepare(tx, now) : undefined;
+      const context = prepared?.ctx ?? await loadShareableContext(tx, ids, true, input.purpose === 'answer');
       if (input.rateLimited) await checkRateLimits(tx, { ...ids, now });
       // Auto-drafts are bounded by the owner's hourly limit too, so strangers cannot drain the allowance.
-      else await checkOwnerRate(tx, { ownerId: ids.ownerId, now });
-      const built = buildAgentPrompt(context, input.question, input.purpose);
+      // A prepared run did its own checks: other people asking this owner's agent must not block the owner's own asks.
+      else if (!prepared) await checkOwnerRate(tx, { ownerId: ids.ownerId, now });
+      const built = prepared?.prompt ?? buildAgentPrompt(context, input.question, input.purpose);
       const micros = reservationMicros(model, built);
-      await reserveBudget(tx, { ownerId: input.ownerId, micros, month });
+      await reserveBudget(tx, { ownerId: input.ownerId, micros, month, globalShare: input.globalShare });
       await tx.run(`CREATE (:ProfileAgentRun {id:$runId, askerId:$askerId, ownerId:$ownerId, messageId:$messageId,
         conversationId:$conversationId, purpose:$purpose, model:$model, status:'running', reservedMicros:$micros, createdAt:datetime($now),
         questionDigest:$digest})`, {
         runId, askerId: input.askerId, ownerId: input.ownerId, messageId: input.messageId, conversationId: input.conversationId,
         purpose: input.purpose, model, micros, now, digest: createHash('sha256').update(input.question ?? '').digest('hex'),
       });
-      return { ctx: context, prompt: built, reserved: micros };
+      return { ctx: context, prompt: built, reserved: micros, allowedLinks: prepared?.allowedLinks, emptyReply: prepared?.emptyReply };
     }));
   } finally { await session.close(); }
 
@@ -381,7 +442,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
 
   // A failed or timed-out call may still be billed upstream: keep the worst-case reservation.
   const actual = generated ? costMicros(model, generated.inputTokens, generated.outputTokens) : reserved;
-  const text = generated ? sanitizeAgentReply(generated.text, ctx) : '';
+  const text = generated ? sanitizeAgentReply(generated.text, ctx, allowedLinks, emptyReply) : '';
   const settle = input.driver.session();
   try {
     await settle.executeWrite(async tx => {
@@ -397,6 +458,8 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
 export async function postAutomaticMessage(driver: Driver, input: {
   ownerId: string; conversationId: string; replyToId: string; content: string;
   props: Record<string, unknown>; idempotencyKey: string;
+  /** Refuse when the owner and anyone else in the chat have blocked each other, as an ordinary send is. */
+  refuseWhenBlocked?: boolean;
 }): Promise<{ message: Record<string, unknown>; participantIds: string[] } | null> {
   const session = driver.session();
   try {
@@ -411,6 +474,7 @@ export async function postAutomaticMessage(driver: Driver, input: {
         MATCH (owner:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
         MATCH (source:Message {id:$replyToId, conversationId:c.id}) WHERE source.deletedAt IS NULL
         AND NOT EXISTS { MATCH (:Message {automaticKey:$key}) }
+        AND (NOT $refuseWhenBlocked OR NOT EXISTS { MATCH (owner)-[:BLOCKED]-(:User)-[:PARTICIPATES_IN]->(c) })
         AND (coalesce(c.communityKind,'') <> 'announcements' OR EXISTS { MATCH (owner)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] })
         CREATE (m:Message {id:$id, content:$content, senderId:$ownerId, conversationId:c.id, messageType:'text',
           replyToId:$replyToId, automaticKey:$key, createdAt:datetime($now)})
@@ -424,7 +488,7 @@ export async function postAutomaticMessage(driver: Driver, input: {
         RETURN m { .*, sender: owner { .id, .name, .avatarUrl },
           replyTo: { id: source.id, content: left(source.content,200), senderId: source.senderId, sender: sourceSender { .id, .name } } } AS message,
           collect(DISTINCT participant.id) AS participantIds
-      `, { ...input, key: input.idempotencyKey, id: nanoid(), now });
+      `, { ...input, refuseWhenBlocked: input.refuseWhenBlocked === true, key: input.idempotencyKey, id: nanoid(), now });
     });
     if (!result.records.length) return null;
     const raw = result.records[0]!.get('message') as Record<string, unknown>;
@@ -466,6 +530,8 @@ export async function askProfileAgent(input: {
     ownerId: source.ownerId, conversationId: source.conversationId, replyToId: input.messageId, content,
     idempotencyKey: `profile-agent:${reply.runId}`,
     props: { viaProfileAgent: true, profileAgentOwnerId: source.ownerId, profileAgentAskerId: input.askerId, profileAgentRunId: reply.runId },
+    // The answer is stored as the owner's message: like their own send, not while they and anyone here have blocked each other.
+    refuseWhenBlocked: true,
   });
   if (!posted) throw new ProfileAgentError(409, 'unavailable', 'The chat changed before the answer could be posted');
   if (input.io && input.broadcast) await input.broadcast(input.io, source.conversationId, posted.message);

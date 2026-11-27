@@ -46,6 +46,8 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { MessageStatusChips } from '../components/MessageStatusChips';
 import { AutoResponseDraftNotice } from '../components/AutoResponseDraftNotice';
+import { ThreadAgentNotice } from '../components/ThreadAgentNotice';
+import { insertAgentTag, isNamedAgent } from '../utils/agentTag';
 import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
@@ -742,6 +744,20 @@ export function ChatScreen({
     () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
     [conversation]
   );
+  // @agent (openchat-6zn): offered in chats between people, in the Chat lane, when composing a new message.
+  const myAgentAnswersHere = !!conversationId && !(!isGroup && other?.isBot) && conversation?.communityKind !== 'announcements';
+  // Where someone is named "Agent", @agent is their mention: the tag is not offered (Ask my agent still is).
+  const agentIsAPerson = useMemo(
+    () => conversation?.participants?.some(p => p?.user?.id !== currentUser?.userId && !p?.user?.isBot && isNamedAgent(p?.user?.name)) ?? false,
+    [conversation?.participants, currentUser?.userId],
+  );
+  const canTagAgent = myAgentAnswersHere && activeConversationLane === 'chat' && !editingMessage && !agentIsAPerson;
+  const tagAgent = useCallback(() => {
+    setText(current => insertAgentTag(current));
+    setMentionQuery(null);
+    mentionAtOffset.current = -1;
+    textInputRef.current?.focus();
+  }, []);
 
   // Mute menu logic (OpenChat-aes)
   const isMuted = !!mutedConvs[conversationId];
@@ -2142,6 +2158,10 @@ export function ChatScreen({
               <AppIcon name="thought" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Stream for this chat</Text>
             </TouchableOpacity>
+            {canTagAgent && <TouchableOpacity onPress={() => { setConversationMenuVisible(false); tagAgent(); }} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="bot" color={c.primary} size={20} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Ask @agent in this chat</Text>
+            </TouchableOpacity>}
             <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="bot" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
@@ -2451,6 +2471,8 @@ export function ChatScreen({
         </View>
       )}
       {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
+      {/* @agent: your own agent answers in this chat (openchat-6zn). Not in bot or announcement chats, never while editing. */}
+      {myAgentAnswersHere && activeConversationLane === 'chat' && <ThreadAgentNotice conversationId={conversationId} text={text} offerTag={canTagAgent} connected={isConnected} onInsert={tagAgent} />}
 
       {announcementReadOnly ? <View testID="announcements-read-only" style={{ padding: space[4], backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
         <Text style={[type.body, { color: c.textMetadata }]}>Only community admins can post announcements.</Text>
@@ -2633,6 +2655,7 @@ export function ChatScreen({
         onCopiedReference={showToast}
         onStatusSaved={() => { void refreshMessageStatuses(); }}
         onProfileAgentAnswered={() => showToast('Agent answered in this chat')}
+        myAgentAvailable={myAgentAnswersHere}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}
