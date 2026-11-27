@@ -94,7 +94,7 @@ function current(s: Selection, p: Awaited<ReturnType<typeof pair>>, account: str
 export async function acceptBeeperReadOffer(
   account: string,
   wire: string,
-  confirm: (scope: Readonly<Selection & Display>) => Promise<boolean>,
+  confirm: (scope: Readonly<Omit<Selection,'network'> & Display>) => Promise<boolean>,
 ) {
   const p = await pair(account);
   let offer: { scope?: unknown; display?: Display };
