@@ -22,12 +22,18 @@ interface Receipt {
   until: number;
   settled: boolean;
 }
+interface RelayGrant extends Grant {
+  deviceTicket: string;
+  machineHash: string;
+  expires: number;
+}
 interface Device {
   key: Identity;
-  grant?: Grant;
+  grant?: RelayGrant;
   token?: string;
   expires?: number;
   receipt?: Receipt;
+  needsNewOffer?: boolean;
 }
 function storage(account: string) {
   if (!/^[a-zA-Z0-9_-]{1,120}$/.test(account)) throw Error('Invalid local account');
@@ -39,7 +45,15 @@ async function save(account: string, device: Device) {
 async function load(account: string): Promise<Device> {
   if (!(await SecureStore.isAvailableAsync())) throw Error('Secure device storage is unavailable.');
   const raw = await SecureStore.getItemAsync(storage(account), options);
-  if (raw) return JSON.parse(raw) as Device;
+  if (raw) {
+    const device = JSON.parse(raw) as Device;
+    if (device.grant && !device.grant.deviceTicket) {
+      const migrated = { key: device.key, needsNewOffer: true };
+      await save(account, migrated);
+      return migrated;
+    }
+    return device;
+  }
   const device = { key: identity(random) };
   await save(account, device);
   return device;
@@ -60,6 +74,7 @@ export function describeMachine(account: string) {
     const d = await load(account);
     return {
       publicKey: d.key.publicKey,
+      needsNewOffer: d.needsNewOffer,
       machine: d.grant?.machine,
       expires: d.expires,
       pending: !!d.token,
@@ -73,7 +88,7 @@ export function forgetMachine(account: string) {
 type Reply = { status: string; text: string; expires: number };
 async function exchange(
   account: string,
-  grant: Grant,
+  grant: RelayGrant,
   secret: string,
   payload: unknown[],
   receipt: Receipt,
@@ -84,12 +99,19 @@ async function exchange(
   const frame = seal(grant, 'request', secret, payload, random);
   if (signal.aborted) throw Error('Machine view closed.');
   return new Promise((resolve, reject) => {
-    const socket = io(OPENCHAT_URL + '/machine-agent-v1', {
+    const socket = io(OPENCHAT_URL + '/machine-agent-v2', {
       forceNew: true,
       autoConnect: false,
       reconnection: false,
       transports: ['websocket'],
-      auth: { route: grant.route, side: 'device', token },
+      auth: {
+        route: grant.route,
+        side: 'device',
+        token,
+        ticket: grant.deviceTicket,
+        machineHash: grant.machineHash,
+        expires: grant.expires,
+      },
     });
     const done = () => {
       clearTimeout(timer);
@@ -109,11 +131,13 @@ async function exchange(
     signal.addEventListener('abort', cancel, { once: true });
     socket.on('connect_error', cancel);
     socket.on('disconnect', cancel);
-    socket.on('connect', () => {
+    socket.once('ready', () => {
       socket.emit('frame', frame, (delivered: unknown) => {
         if (delivered !== true) {
           done();
-          reject(Error('Machine offline. Start the local machine listener.'));
+          reject(
+            Error('The relay reported no machine connection. Check the machine for a verified receipt.'),
+          );
         }
       });
     });
@@ -133,9 +157,17 @@ async function exchange(
         typeof status !== 'string' ||
         typeof text !== 'string' ||
         text.length > MAX_RESULT ||
-        !['paired', 'result', 'denied', 'expired', 'attention', 'error', 'unknown', 'busy', 'pending'].includes(
-          status,
-        )
+        ![
+          'paired',
+          'result',
+          'denied',
+          'expired',
+          'attention',
+          'error',
+          'unknown',
+          'busy',
+          'pending',
+        ].includes(status)
       )
         return;
       done();
@@ -156,10 +188,18 @@ export function machineRequest(
     let action = kind;
     if (action === 'pair') {
       if (d.grant && !d.token) throw Error('Forget the current machine before pairing another.');
-      const g = parseOffer(value, d.key.publicKey, now);
+      const g = parseOffer(value, d.key.publicKey, now, account);
       if (d.grant && d.grant.route !== g.route) throw Error('Forget the pending offer before replacing it.');
-      d.grant = { route: g.route, machine: g.machine, device: g.device };
+      d.grant = {
+        route: g.route,
+        machine: g.machine,
+        device: g.device,
+        deviceTicket: g.deviceTicket,
+        machineHash: g.machineHash,
+        expires: g.expires,
+      };
       d.token = g.token;
+      delete d.needsNewOffer;
 
       d.receipt ??= {
         seq: 0,
@@ -169,7 +209,8 @@ export function machineRequest(
       };
     }
     if (!d.grant) throw Error('Pair this device first.');
-    if (d.expires && now >= d.expires) throw Error('Machine grant expired. Forget it and request a new offer.');
+    if (d.expires && now >= d.expires)
+      throw Error('Machine grant expired. Forget it and request a new offer.');
     if (action === 'check' && d.token) action = 'pair';
     if (action === 'turn') {
       if (d.token) throw Error('Complete pairing first.');
@@ -208,6 +249,6 @@ export function machineRequest(
     )
       r.settled = true;
     await save(account, d);
-    return response.text;
+    return { status: response.status, text: response.text };
   });
 }

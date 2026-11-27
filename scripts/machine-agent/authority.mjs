@@ -12,7 +12,7 @@ import {
   validHex,
 } from '../../apps/mobile/src/services/machineAgent/channel.mjs';
 
-const hash = (text) => createHash('sha256').update(text).digest('hex');
+export const hash = (text) => createHash('sha256').update(text).digest('hex');
 const empty = 'Delivery uncertain. Check this turn on the machine before sending again.';
 export class Authority {
   constructor(file, clock = Date.now) {
@@ -26,6 +26,36 @@ export class Authority {
         seq INTEGER NOT NULL DEFAULT -1, request TEXT, digest TEXT, reply TEXT, stage TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS bound_agent ON grants(agent) WHERE state != 'revoked' OR stage = 'sent';`);
+    this.transaction(() => {
+      const columns = this.db
+        .prepare('PRAGMA table_info(grants)')
+        .all()
+        .map((c) => c.name);
+      if (!columns.includes('relayTicket')) {
+        this.db.exec(
+          "ALTER TABLE grants ADD COLUMN relayTicket TEXT; UPDATE grants SET state='revoked',reply=NULL,tokenHash=NULL; UPDATE grants SET stage='quarantined' WHERE stage IN ('sent','review');",
+        );
+      }
+      const fields = this.db
+        .prepare('PRAGMA table_info(grants)')
+        .all()
+        .map((c) => c.name);
+      for (const [name, type] of [
+        ['localProof', 'TEXT'],
+        ['context', 'TEXT'],
+        ['daemonTurn', 'TEXT'],
+        ['approvedHash', 'TEXT'],
+        ['deadline', 'INTEGER'],
+      ]) {
+        if (!fields.includes(name)) this.db.exec('ALTER TABLE grants ADD COLUMN ' + name + ' ' + type);
+      }
+      this.db.exec(
+        "UPDATE grants SET localProof=lower(hex(randomblob(32))) WHERE localProof IS NULL AND state='revoked'",
+      );
+      this.db.exec(
+        'CREATE TABLE IF NOT EXISTS scoped_receipts(route TEXT NOT NULL, turn TEXT NOT NULL, PRIMARY KEY(route,turn))',
+      );
+    });
     const key = identity(randomBytes);
     this.db.prepare('INSERT OR IGNORE INTO machine VALUES(1,?,?)').run(key.publicKey, key.secretKey);
     this.machine = this.db.prepare('SELECT * FROM machine WHERE id=1').get();
@@ -44,24 +74,61 @@ export class Authority {
       throw err;
     }
   }
-  offer(device, agent, workspace, mode = 'read-only') {
+  offer(device, agent, workspace, mode, owner) {
     if (
+      typeof owner !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,120}$/.test(owner) ||
       !['read-only', 'auto'].includes(mode) ||
       !validHex(device, 32) ||
       !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(agent) ||
       !workspace.startsWith('/')
     )
       throw Error('Invalid local scope');
-    const route = hex(randomBytes(24)),
-      token = hex(randomBytes(32)),
+    const token = hex(randomBytes(32)),
       now = this.now();
-    const until = now + 10 * 60_000;
-    this.db
-      .prepare(
-        "INSERT INTO grants(route,device,agent,workspace,mode,tokenHash,offerUntil,expires,state) VALUES(?,?,?,?,?,?,?,?,'pending')",
-      )
-      .run(route, device, agent, workspace, mode, hash(token), until, now + 24 * 60 * 60_000);
-    return { route, offer: JSON.stringify([PROTOCOL, route, this.machine.pub, device, token, until]) };
+    const until = now + 10 * 60_000,
+      expires = now + 24 * 60 * 60_000;
+    const deviceTicket = hex(randomBytes(32)),
+      machineTicket = hex(randomBytes(32)),
+      machineHash = hash(machineTicket);
+    const route = hash(
+      JSON.stringify(['openchat.relay.v2', owner, expires, machineHash, hash(deviceTicket)]),
+    ).slice(0, 48);
+    this.transaction(() => {
+      if (this.db.prepare('SELECT 1 FROM grants WHERE agent=?').get(agent))
+        throw Error('Use a fresh agent for each grant');
+      this.db
+        .prepare(
+          "INSERT INTO grants(route,device,agent,workspace,mode,tokenHash,offerUntil,expires,relayTicket,localProof,state) VALUES(?,?,?,?,?,?,?,?,?,?,'pending')",
+        )
+        .run(
+          route,
+          device,
+          agent,
+          workspace,
+          mode,
+          hash(token),
+          until,
+          expires,
+          machineTicket,
+          hex(randomBytes(32)),
+        );
+    });
+    return {
+      route,
+      offer: JSON.stringify([
+        PROTOCOL,
+        route,
+        this.machine.pub,
+        device,
+        token,
+        until,
+        owner,
+        expires,
+        deviceTicket,
+        machineHash,
+      ]),
+    };
   }
   revoke(route) {
     return this.transaction(() => {
@@ -128,6 +195,7 @@ export class Authority {
         action === 'pair' &&
         n === 0 &&
         g.state === 'pending' &&
+        g.context &&
         g.offerUntil > now &&
         validHex(body, 32) &&
         timingSafeEqual(Buffer.from(hash(body), 'hex'), Buffer.from(g.tokenHash, 'hex'))
@@ -142,29 +210,48 @@ export class Authority {
       }
       if (action !== 'turn' || g.state !== 'active' || n <= g.seq || !body.trim() || body.length > MAX_PROMPT)
         return;
-      if (g.stage === 'review' || g.stage === 'sent') return reply('busy', empty);
+      if (/^\s*\//u.test(body)) return reply('denied', 'Only a literal agent message can be approved.');
+      if (g.stage && g.stage !== 'done') return reply('busy', empty);
       // Reserve durably before any prompt, provider call or crash. A duplicate never redispatches.
       this.db
-        .prepare("UPDATE grants SET seq=?,request=?,digest=?,stage='review',reply=NULL WHERE route=?")
+        .prepare(
+          "UPDATE grants SET seq=?,request=?,digest=?,stage='review',reply=NULL,daemonTurn=NULL,approvedHash=NULL,deadline=NULL WHERE route=?",
+        )
         .run(n, id, digest, route);
-      return { job: { route, agent: g.agent, workspace: g.workspace, mode: g.mode, id, n, text: body, until } };
+      return {
+        job: { route, agent: g.agent, workspace: g.workspace, mode: g.mode, id, n, text: body, until },
+      };
     });
   }
-  dispatch(job, start) {
-    // Linearize dispatch with revoke. start must initiate the local SDK send before returning.
+  dispatch(job) {
     return this.transaction(() => {
       const g = this.grant(job.route);
-      if (!this.allowed(g, job.n, job.id) || g.stage !== 'review' || this.now() >= job.until) return null;
-      this.db.prepare("UPDATE grants SET stage='sent' WHERE route=?").run(job.route);
-      return { started: start() };
+      if (!this.allowed(g, job.n, job.id) || !g.context || g.stage !== 'review' || this.now() >= job.until)
+        return null;
+      this.db
+        .prepare("UPDATE grants SET stage='reserved',approvedHash=?,deadline=? WHERE route=?")
+        .run(hash(job.text), job.until, job.route);
+      return { route: job.route, proof: g.localProof, item: job.id, text: job.text };
     });
   }
-  finish(job, status, text) {
+  finish(job, status, text, turnId) {
     return this.transaction(() => {
       const g = this.grant(job.route);
       if (!this.allowed(g, job.n, job.id)) return;
+      if (
+        status === 'result' &&
+        !(
+          turnId &&
+          g.stage === 'terminal' &&
+          g.daemonTurn === turnId &&
+          this.db.prepare('SELECT 1 FROM scoped_receipts WHERE route=? AND turn=?').get(job.route, turnId)
+        )
+      ) {
+        status = 'attention';
+        text = empty;
+      }
       const frame = this.response(g, job.n, job.id, status, text.slice(0, MAX_RESULT));
-      const stage = g.stage === 'sent' && ['attention', 'error'].includes(status) ? 'sent' : 'done';
+      const stage = status === 'result' || g.stage === 'review' ? 'done' : 'quarantined';
       this.db.prepare('UPDATE grants SET stage=?,reply=? WHERE route=?').run(stage, frame, job.route);
       return frame;
     });

@@ -9,7 +9,12 @@ import { attachMachineRelay } from '../src/websocket/machineRelay';
 import { Authority } from '../../../scripts/machine-agent/authority.mjs';
 import { describeMachine, machineRequest } from '../../mobile/src/services/machineAgent/client';
 
-const env = vi.hoisted(() => ({ url: '', token: '', account: 'fixture', storage: new Map<string, string>() }));
+const env = vi.hoisted(() => ({
+  url: '',
+  token: '',
+  account: 'fixture',
+  storage: new Map<string, string>(),
+}));
 vi.mock('../../mobile/src/api/client', () => ({
   get OPENCHAT_URL() {
     return env.url;
@@ -37,15 +42,15 @@ test('native client actions through real relay preserve account isolation and re
   env.url = 'http://127.0.0.1:' + addr.port;
   const state = new Authority(':memory:');
   const client = await describeMachine('fixture');
-  const invite = state.offer(client.publicKey, randomUUID(), '/fixture');
-  const host = io(env.url + '/machine-agent-v1', {
-    auth: { route: invite.route, side: 'machine' },
+  const invite = state.offer(client.publicKey, randomUUID(), '/fixture', 'auto', 'fixture');
+  state.db.prepare("UPDATE grants SET context='fixture' WHERE route=?").run(invite.route);
+  const host = io(env.url + '/machine-agent-v2', {
+    auth: { route: invite.route, side: 'machine', ticket: state.grant(invite.route).relayTicket },
     transports: ['websocket'],
     autoConnect: false,
   });
-  const connected = once(host, 'connect');
+  host.on('connect_error', () => setTimeout(() => host.connect(), 20).unref());
   host.connect();
-  await connected;
   const seen: string[] = [];
   let priorReply = '',
     turns = 0;
@@ -56,15 +61,26 @@ test('native client actions through real relay preserve account isolation and re
     if (item.reply) host.emit('frame', item.reply);
     else {
       turns++;
-      priorReply = state.finish(item.job, 'result', 'private result');
+      state.dispatch(item.job);
+      state.db
+        .prepare("UPDATE grants SET stage='terminal',daemonTurn='fixture' WHERE route=?")
+        .run(invite.route);
+      state.db.prepare("INSERT INTO scoped_receipts VALUES(?,'fixture')").run(invite.route);
+      priorReply = state.finish(item.job, 'result', 'private result', 'fixture');
       host.emit('frame', priorReply);
     }
   });
   const signal = AbortSignal.timeout(10_000);
   try {
-    expect(await machineRequest('fixture', 'pair', invite.offer, signal)).toMatch(/paired/);
-    expect(await machineRequest('fixture', 'turn', 'private prompt', signal)).toBe('private result');
-    expect(await machineRequest('fixture', 'check', '', signal)).toBe('private result');
+    expect(await machineRequest('fixture', 'pair', invite.offer, signal)).toMatchObject({ status: 'paired' });
+    expect(await machineRequest('fixture', 'turn', 'private prompt', signal)).toEqual({
+      status: 'result',
+      text: 'private result',
+    });
+    expect(await machineRequest('fixture', 'check', '', signal)).toEqual({
+      status: 'result',
+      text: 'private result',
+    });
     expect(turns).toBe(1);
     expect(seen.join('')).not.toMatch(/private|prompt|result/);
     expect([...env.storage.values()].join('')).not.toMatch(/private prompt|private result/);

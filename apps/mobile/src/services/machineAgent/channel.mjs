@@ -3,7 +3,7 @@
 import nacl from 'tweetnacl';
 import { Buffer } from 'buffer';
 
-export const PROTOCOL = 'openchat.machine.v1';
+export const PROTOCOL = 'openchat.machine.v2';
 export const REQUEST_LIFETIME = 5 * 60_000;
 export const MAX_FRAME = 48_000;
 export const MAX_PROMPT = 2_000;
@@ -62,7 +62,7 @@ export function open(
     throw new Error('Incorrect channel');
   return fields[5];
 }
-export function parseOffer(text, device, now) {
+export function parseOffer(text, device, now, account) {
   if (typeof text !== 'string' || text.length > 1500) throw new Error('Invalid machine offer');
   let fields;
   try {
@@ -70,9 +70,15 @@ export function parseOffer(text, device, now) {
   } catch {
     throw new Error('Invalid machine offer');
   }
-  if (!Array.isArray(fields) || fields.length !== 6) throw new Error('Invalid machine offer');
-  const [protocol, route, machine, client, token, until] = fields;
+  if (!Array.isArray(fields) || fields.length !== 10) throw new Error('Invalid machine offer');
+  const [protocol, route, machine, client, token, until, owner, expires, deviceTicket, machineHash] = fields;
   if (
+    owner !== account ||
+    !validHex(deviceTicket, 32) ||
+    !validHex(machineHash, 32) ||
+    !Number.isSafeInteger(expires) ||
+    expires <= now ||
+    expires > now + 86400000 ||
     protocol !== PROTOCOL ||
     !validHex(route, 24) ||
     !validHex(machine, 32) ||
@@ -83,5 +89,5 @@ export function parseOffer(text, device, now) {
     until > now + 10 * 60_000
   )
     throw new Error('Offer expired or for another device');
-  return { route, machine, device, token, until };
+  return { route, machine, device, token, until, deviceTicket, machineHash, expires };
 }

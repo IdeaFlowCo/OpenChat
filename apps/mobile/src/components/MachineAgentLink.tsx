@@ -65,14 +65,14 @@ function MachineSheet({ account, close }: { account: string; close: () => void }
           setStatus('Device key forgotten. Revoke the grant on your machine.');
         }
       } else {
-        const text = await machineRequest(
+        const reply = await machineRequest(
           account,
           action,
           action === 'pair' ? offer : message,
           controller.current.signal,
         );
         if (mounted.current) {
-          setStatus(text);
+          setStatus('Verified machine response · ' + reply.status + '\n' + reply.text);
           setOffer('');
           if (action === 'turn') setMessage('');
         }
@@ -113,7 +113,14 @@ function MachineSheet({ account, close }: { account: string; close: () => void }
           <>
             {!device?.machine && device && (
               <>
-                <Text style={textColor}>Give this public device key to the operator of your machine.</Text>
+                {device.needsNewOffer && (
+                  <Text style={textColor}>
+                    The previous pairing has expired. Request a new machine offer.
+                  </Text>
+                )}
+                <Text style={textColor}>
+                  Give the operator your OpenChat account ID ({account}) and this public device key.
+                </Text>
                 <Text selectable style={[type.meta, textColor]}>
                   {device.publicKey}
                 </Text>

@@ -16,6 +16,9 @@ export interface Grant {
 export interface Offer extends Grant {
   token: string;
   until: number;
+  deviceTicket: string;
+  machineHash: string;
+  expires: number;
 }
 export function hex(bytes: Uint8Array): string;
 export function validHex(value: unknown, size: number): boolean;
@@ -28,4 +31,4 @@ export function seal(
   random: Random,
 ): string;
 export function open(grant: Grant, direction: 'request' | 'reply', secret: string, frame: unknown): unknown;
-export function parseOffer(text: string, device: string, now: number): Offer;
+export function parseOffer(text: string, device: string, now: number, account: string): Offer;
