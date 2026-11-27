@@ -11,6 +11,7 @@ export interface LocalBeeperReadCapability {
   chatKey:string;
   grantId:string;
   expiresAt:number;
+  readonly display?:Readonly<{title:string;chatType:'direct'|'group'}>;
   /** The reviewed device registry owns keys and monotonically authorizes this
    * typed operation. It must never use a server-provided key or generic prompt. */
   sealRead(request:Readonly<Record<string,unknown>>):Promise<string>;
@@ -32,10 +33,11 @@ export class BeeperSecureGrantRequired extends Error {
 }
 export async function authorizeBeeperRead(connection:BeeperReadConnection,job:BeeperReadJob,chat:BeeperCatalogueEntry):Promise<string>{
   const resolver=resolveLocal;
-  if(!resolver||connection.state!=='active'||Date.parse(connection.expiresAt)<=Date.now())throw new BeeperSecureGrantRequired();
+  if(!resolver||connection.state!=='active'||!Number.isFinite(Date.parse(connection.expiresAt))||Date.parse(connection.expiresAt)<=Date.now())throw new BeeperSecureGrantRequired();
   const scope:Scope={route:connection.id,audience:'beeper.read',machineKey:connection.machineKey,deviceKey:connection.deviceKey,accountKey:connection.accountKey,chatKey:chat.chatKey};
   const grant=await resolver(Object.freeze(scope));
   if(resolveLocal!==resolver||!grant||grant.protocol!=='openchat.beeper.read.v1'||grant.expiresAt<=Date.now()
+    ||(grant.display && (grant.display.title!==chat.title || grant.display.chatType!==chat.chatType))
     ||Object.entries(scope).some(([key,value])=>grant[key as keyof Scope]!==value))throw new BeeperSecureGrantRequired();
   if(!job.id||!Number.isSafeInteger(job.epoch)||job.epoch<1)throw new Error('Reload the selected chat request before approving it.');
   const requestId=Array.from(await Crypto.getRandomBytesAsync(16),b=>b.toString(16).padStart(2,'0')).join('');

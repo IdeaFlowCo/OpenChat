@@ -35,14 +35,15 @@ function page(value){
 export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch,timeoutMs=10000}){
   if(typeof readToken!=='function'||!Number.isInteger(port)||port<1024||port>65535||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>30000)bad();
   const origin=`http://127.0.0.1:${port}`;
-  async function get(path,query={}){
+  async function get(path,query={},beforeFetch){
     const token=await readToken();
     if(typeof token!=='string'||!token||/[\r\n]/u.test(token))throw new BeeperApiError('authorization_required');
     const url=new URL(path,origin);
     for(const [key,value] of Object.entries(query))if(value!==undefined)url.searchParams.set(key,identifier(value));
     let response;
-    try{response=await fetchImpl(url,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(timeoutMs)});}
-    catch{throw new BeeperApiError('unavailable');}
+    const start=()=>fetchImpl(url,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
+    try{response=await (beforeFetch?beforeFetch(start):start());}
+    catch(error){if(error?.code==='local_approval_required')throw error;throw new BeeperApiError('unavailable');}
     if(response.status===401||response.status===403)throw new BeeperApiError('authorization_required');
     if(!response.ok)throw new BeeperApiError('unavailable');
     if(!response.headers.get('content-type')?.includes('application/json'))bad();
@@ -56,9 +57,9 @@ export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch
     info:()=>get('/v1/info'),
     accounts:async()=>{const value=await get('/v1/accounts');if(!Array.isArray(value))bad();return value;},
     /** @returns {Promise<Page>} */
-    chats:async(accountId,{cursor,direction='before'}={})=>{
+    chats:async(accountId,{cursor,direction='before',beforeFetch}={})=>{
       if(!['before','after'].includes(direction))bad();
-      const value=page(await get('/v1/chats',{accountIDs:identifier(accountId),cursor,direction}));
+      const value=page(await get('/v1/chats',{accountIDs:identifier(accountId),cursor,direction},beforeFetch));
       // Server filtering is not an authority boundary: the Mac checks every row.
       if(value.items.some(chat=>chat.accountID!==accountId))bad();return value;
     },
@@ -68,9 +69,9 @@ export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch
       if(value?.id!==chatId||value?.accountID!==accountId)bad();return value;
     },
     /** @returns {Promise<Page>} */
-    messages:async(accountId,chatId,{cursor,direction='before'}={})=>{
+    messages:async(accountId,chatId,{cursor,direction='before',beforeFetch}={})=>{
       if(!['before','after'].includes(direction))bad();
-      const value=page(await get(`/v1/chats/${encodeURIComponent(identifier(chatId))}/messages`,{cursor,direction}));
+      const value=page(await get(`/v1/chats/${encodeURIComponent(identifier(chatId))}/messages`,{cursor,direction},beforeFetch));
       if(value.items.some(message=>message.accountID!==accountId||message.chatID!==chatId))bad();return value;
     },
   });
