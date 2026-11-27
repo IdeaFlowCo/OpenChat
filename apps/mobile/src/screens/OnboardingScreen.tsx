@@ -58,9 +58,10 @@ type NavProp = NativeStackNavigationProp<RootStackParamList, 'Onboarding'>;
 
 interface Props {
   navigation: NavProp;
+  onComplete?: () => void;
 }
 
-export function OnboardingScreen({ navigation }: Props) {
+export function OnboardingScreen({ navigation, onComplete }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const { currentUser, updateProfile } = useChat();
@@ -113,7 +114,9 @@ export function OnboardingScreen({ navigation }: Props) {
       /* non-fatal */
     }
     navigation.replace('Main');
-  }, [navigation]);
+    // Storage is not reactive: let Shell enable post-onboarding UI this session.
+    onComplete?.();
+  }, [navigation, onComplete]);
 
   // ── avatar pick (step 1) ──────────────────────────────────────────────────
 

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { hasCompletedOnboarding } from '../services/onboarding';
 
 /** Null blocks authenticated navigation until this auth identity's check settles. */
-export function useDeviceOnboardingGate(isAuthed: boolean, userId?: string): boolean | null {
+export function useDeviceOnboardingGate(isAuthed: boolean, userId?: string) {
   const identity = isAuthed ? userId || 'authenticated' : null;
   const [check, setCheck] = useState<{ identity: string; done: boolean } | null>(null);
   useEffect(() => {
@@ -17,5 +17,9 @@ export function useDeviceOnboardingGate(isAuthed: boolean, userId?: string): boo
     });
     return () => { active = false; };
   }, [identity]);
-  return identity && check?.identity === identity ? check.done : null;
+  const complete = useCallback(() => {
+    // A late completion must not open navigation for a different auth identity.
+    setCheck(previous => previous?.identity === identity ? { ...previous, done: true } : previous);
+  }, [identity]);
+  return { done: identity && check?.identity === identity ? check.done : null, complete };
 }

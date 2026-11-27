@@ -670,7 +670,7 @@ export function Shell() {
   const c = getColors(scheme);
   const { isAuthed, authInitialized, bootstrapIfAuthed, currentUser } = useChat();
 
-  const deviceOnboardingDone = useDeviceOnboardingGate(isAuthed, currentUser?.userId);
+  const { done: deviceOnboardingDone, complete: completeDeviceOnboarding } = useDeviceOnboardingGate(isAuthed, currentUser?.userId);
   const onboardingDone = isUnlinkedEmbed() ? true : deviceOnboardingDone;
   const onboardingChecked = onboardingDone !== null;
 
@@ -744,9 +744,10 @@ export function Shell() {
             {isAuthed && onboardingChecked && !onboardingDone ? (
               <RootStack.Screen
                 name="Onboarding"
-                component={OnboardingScreen}
                 options={{ animation: 'fade' }}
-              />
+              >
+                {props => <OnboardingScreen {...props} onComplete={completeDeviceOnboarding} />}
+              </RootStack.Screen>
             ) : null}
             <RootStack.Screen name="Main">
               {() => <AuthedTabs currentUser={currentUser} c={c} />}
