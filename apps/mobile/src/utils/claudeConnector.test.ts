@@ -33,5 +33,8 @@ describe('system browser on phones', () => {
     await expect(openInSystemBrowser(url, 'ios', refuseSafari)).resolves.toBe(true);
     expect(tried).toEqual([`x-safari-${url}`, url]);
     await expect(openInSystemBrowser(url, 'web', async () => { throw new Error('blocked'); })).resolves.toBe(false);
+    const both: string[] = [];
+    await expect(openInSystemBrowser(url, 'ios', async target => { both.push(target); throw new Error('blocked'); })).resolves.toBe(false);
+    expect(both).toEqual([`x-safari-${url}`, url]);
   });
 });

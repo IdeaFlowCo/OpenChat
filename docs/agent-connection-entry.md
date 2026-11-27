@@ -21,7 +21,7 @@ link, because Claude's phone apps cannot add connectors. Claude still shows the
 dialog for the person to confirm, and Ideaflow ID asks for consent; the link
 grants nothing by itself. When the Ideaflow connector is listed in Claude's
 directory, point this at its `https://claude.ai/directory/connectors/<slug>`
-page instead. A one-line note gives ChatGPT users the same connector URL.
+page instead. A one-line note gives ChatGPT users the same connector URL where their plan allows custom connectors.
 
 Unlinked and Notestream Vision should use the same label and destination in
 their account/navigation utility areas. Avoid separate product connectors or

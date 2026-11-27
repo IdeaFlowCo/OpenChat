@@ -28,8 +28,8 @@ export function ConnectAgentLink({ detail = false }: { detail?: boolean }) {
         <Text style={{ color: c.primary, ...type.label, fontWeight: '600' }}>Connect Claude ↗</Text>
         <Text style={{ color: c.textMetadata, ...type.label, marginTop: space[1] }}>Opens Claude with the Ideaflow connector filled in. Click Add, then approve.</Text>
       </TouchableOpacity>
-      {claudeError && <Text accessibilityRole="alert" style={{ color: c.danger, paddingHorizontal: space[4] }}>Could not open Claude. In Claude, go to Settings, Connectors, Add custom connector, and paste {IDEAFLOW_MCP_URL}</Text>}
-      <Text selectable style={{ color: c.textMetadata, ...type.meta, paddingHorizontal: space[4], paddingBottom: space[2] }}>ChatGPT: add {IDEAFLOW_MCP_URL} as a custom connector.</Text>
+      {claudeError && <Text selectable accessibilityRole="alert" style={{ color: c.danger, ...type.label, paddingHorizontal: space[4] }}>Could not open Claude. In Claude, go to Settings, Connectors, Add custom connector, and paste {IDEAFLOW_MCP_URL}</Text>}
+      <Text selectable style={{ color: c.textMetadata, ...type.meta, paddingHorizontal: space[4], paddingBottom: space[2] }}>ChatGPT: where your plan allows custom connectors, add {IDEAFLOW_MCP_URL}.</Text>
     </>}
   </View>;
 }
