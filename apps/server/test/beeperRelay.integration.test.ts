@@ -45,6 +45,7 @@ integration('Beeper relay is a private transactional importer, not machine autho
     expect((await request(app).post('/api/beeper/connections').send({offer})).status).toBe(401);
     expect((await request(app).post('/api/beeper/connections').set('Authorization',auth(uid,{embedded:'unlinked'})).send({offer})).status).toBe(403);
     const approved=await ownerPost('/api/beeper/connections',{offer});expect(approved.status).toBe(201);expect(approved.body.id).toBe(connectionId);
+    await run('MATCH(c:OpenChatBeeperConnection {id:$id}) REMOVE c.network',{id:connectionId}); // genuine legacy row has no network property
     expect(JSON.stringify(approved.body)).not.toContain(secret);expect(JSON.stringify(approved.body)).not.toContain(relayTokenHash);
     expect((await request(app).get(path+'/chats').set('Authorization',auth(other))).status).toBe(404);
     expect((await request(app).post('/api/beeper/relay/claim').set('Authorization',auth()).send({})).status).toBe(401);
@@ -58,6 +59,13 @@ integration('Beeper relay is a private transactional importer, not machine autho
     const publish=await request(app).post('/api/beeper/relay/catalogue').set('Authorization','Bearer '+localToken).send({items:[{accountKey,chatKey,network:'whatsapp',chatType:'group',title:'Must not disclose',capturedAt:new Date().toISOString(),lastActivityAt:null}],complete:false});
     expect(publish.status).toBe(403);expect(publish.body.error).toBe('relay_owner_binding_mismatch');
     expect(Number((await run(`MATCH(e:OpenChatBeeperCatalogue {connectionId:$route}) RETURN count(e) AS n`,{route})).records[0]!.get('n'))).toBe(0);
+    const imToken='ocbr_'+randomBytes(32).toString('base64url'),imRoute='8'.repeat(48);
+    const im={...offer,protocol:'openchat.beeper.imessage.read.v1' as const,network:'imessage' as const,connectionId:imRoute,relayTokenHash:createHash('sha256').update(imToken).digest('hex')};im.relayBinding=service.beeperRelayBinding(imToken,im);
+    const downgraded:any={...im,protocol:'openchat.beeper.read.v1'};delete downgraded.network;
+    expect((await ownerPost('/api/beeper/connections',{offer:downgraded})).status).toBe(201);
+    const denied=await request(app).post('/api/beeper/relay/catalogue').set('Authorization','Bearer '+imToken).send({items:[],complete:false});
+    expect(denied.status).toBe(403);expect(denied.body.error).toBe('relay_owner_binding_mismatch');
+
   });
   it('authenticates before a large upload and persists only the permitted catalogue fields',async()=>{
     const anonymous=await request(app).post('/api/beeper/relay/deliver').set('Content-Type','application/json').send('x'.repeat(150000));expect(anonymous.status).toBe(401);
@@ -65,6 +73,7 @@ integration('Beeper relay is a private transactional importer, not machine autho
       preview:'private preview canary',participants:['private roster canary'],srcURL:'https://never-fetch.invalid'};
     expect((await relayPost('catalogue',{items:[{...entry,accountKey:'f'.repeat(64)}],complete:false})).status).toBe(403);
     expect((await relayPost('catalogue',{items:[entry],complete:true})).status).toBe(200);
+    expect((await relayPost('catalogue',{items:[{...entry,network:'imessage'}],complete:false})).status).toBe(403);
     const rows=await run(`MATCH(e:OpenChatBeeperCatalogue {ownerUserId:$uid}) RETURN properties(e) AS props`,{uid});
     const serialized=JSON.stringify(rows.records[0]!.get('props'));expect(serialized).not.toContain('canary');expect(serialized).not.toContain('srcURL');
     expect((await request(app).get(path+'/chats').set('Authorization',auth())).body.items[0].title).toBe('Synthetic source');
@@ -86,13 +95,17 @@ integration('Beeper relay is a private transactional importer, not machine autho
     const initial=await ownerPost(path+'/reads',{chatKey,clientRequestId:'first',kind:'open'});expect(initial.status).toBe(201);job=initial.body;
     const retry=await ownerPost(path+'/reads',{chatKey,clientRequestId:'first',kind:'open'});expect(retry.body.id).toBe(job.id);
     expect((await relayPost('claim',{})).body.job).toBeNull();
+    await run('MATCH(j:OpenChatBeeperJob {id:$id}) REMOVE j.network',{id:job.id}); // legacy pending job
     expect((await request(app).put(path+'/reads/'+job.id+'/intent').set('Authorization',auth(other)).send({frame:Buffer.alloc(48,7).toString('base64')})).status).toBe(404);
     expect((await request(app).put(path+'/reads/'+job.id+'/intent').set('Authorization',auth()).send({frame:Buffer.alloc(48,7).toString('base64')})).status).toBe(200);
-    const claimed=await relayPost('claim',{});lease=claimed.body.job;expect(claimed.body.job.chatKey).toBe(chatKey);expect(typeof claimed.body.job.epoch).toBe('number');
+    const claimed=await relayPost('claim',{});lease=claimed.body.job;expect(claimed.body.job).not.toHaveProperty('network');expect(claimed.body.job.chatKey).toBe(chatKey);expect(typeof claimed.body.job.epoch).toBe('number');
   });
   it('commits import and acknowledgement exactly once, refuses changed retries, and marks success only at final batch',async()=>{
-    const value=payload();const first=await relayPost('deliver',batch(value));expect(first.status).toBe(200);chatId=first.body.chatId;
+    const value=payload(),mislabeled=payload();mislabeled.source.network='imessage';
+    expect((await relayPost('deliver',batch(mislabeled))).status).toBe(403);
+    const first=await relayPost('deliver',batch(value));expect(first.status).toBe(200);chatId=first.body.chatId;
     expect((await relayPost('deliver',batch(value))).body.duplicate).toBe(true);
+    expect((await relayPost('deliver',batch(mislabeled))).status).toBe(403);
     expect((await relayPost('deliver',batch(payload('Changed same sequence')))).status).toBe(409);
     let record=await run(`MATCH(c:OpenChatBeeperConnection {id:$id}) RETURN c.lastSuccessAt AS success`,{id:connectionId});expect(record.records[0]!.get('success')).toBeNull();
     const changed=payload('Synthetic edited source','2026-11-26T22:59:00Z');changed.messages[0]!.editedAt='2026-11-26T23:01:00Z';
@@ -136,6 +149,36 @@ integration('Beeper relay is a private transactional importer, not machine autho
     expect((await request(app).delete(path).set('Authorization',auth())).status).toBe(200);
     expect((await relayPost('deliver',batch(payload('Revoked upload')))).status).toBe(401);
     const rows=await run(`MATCH(m:OpenChatImportedMessage {ownerUserId:$uid}) RETURN collect(m.text) AS texts`,{uid});expect(rows.records[0]!.get('texts')).not.toContain('Revoked upload');
+  });
+  it('keeps optional iMessage catalogue and history in the same private transactional reader',async()=>{
+    const route='a'.repeat(48),localToken='ocbr_'+randomBytes(32).toString('base64url'),selected='b'.repeat(64);
+    const localOffer={...offer,protocol:'openchat.beeper.imessage.read.v1' as const,network:'imessage' as const,connectionId:route,relayTokenHash:createHash('sha256').update(localToken).digest('hex')};
+    localOffer.relayBinding=service.beeperRelayBinding(localToken,localOffer as any);
+    expect((await ownerPost('/api/beeper/connections',{offer:localOffer})).status).toBe(201);
+    const relay=(action:string,body:unknown)=>request(app).post('/api/beeper/relay/'+action).set('Authorization','Bearer '+localToken).send(body);
+    const entry={accountKey,chatKey:selected,network:'imessage',chatType:'direct',title:'Synthetic iMessage',capturedAt:new Date().toISOString(),lastActivityAt:null};
+    expect((await relay('catalogue',{items:[],complete:false})).status).toBe(200);
+    const empty=await request(app).get('/api/beeper/connections/'+route+'/chats').set('Authorization',auth());expect(empty.body).toMatchObject({items:[],connection:{network:'imessage',catalogueEmpty:true}});expect(empty.body.connection.catalogueReportedAt).toBeTypeOf('string');
+    expect((await relay('catalogue',{items:[{...entry,network:'whatsapp'}],complete:false})).status).toBe(403);
+    expect((await relay('catalogue',{items:[entry],complete:false})).status).toBe(200);
+    const p='/api/beeper/connections/'+route;
+    expect((await request(app).get(p+'/chats').set('Authorization',auth())).body.items[0]).toMatchObject({network:'imessage',chatKey:selected});
+    expect((await request(app).get(p+'/chats').set('Authorization',auth(other))).status).toBe(404);
+    const read=await ownerPost(p+'/reads',{chatKey:selected,clientRequestId:'imessage',kind:'open'});expect(read.status).toBe(201);
+    expect((await request(app).put(p+'/reads/'+read.body.id+'/intent').set('Authorization',auth()).send({frame:Buffer.alloc(48,7).toString('base64')})).status).toBe(200);
+    const claimed=await relay('claim',{});expect(claimed.body.job).toMatchObject({id:read.body.id,network:'imessage'});
+    const value=payload();value.source={...value.source,network:'imessage',chatKey:selected,chatType:'direct'};
+    const body={jobId:read.body.id,leaseId:claimed.body.job.leaseId,sequence:0,final:true,payload:value,digest:service.beeperPayloadDigest({payload:value,final:true})};
+    const imported=await relay('deliver',body);expect(imported.status).toBe(200);
+    expect((await relay('deliver',body)).body.duplicate).toBe(true);
+    const wrong=structuredClone(body);wrong.payload.source.network='whatsapp';wrong.digest=service.beeperPayloadDigest({payload:wrong.payload,final:true});expect((await relay('deliver',wrong)).status).toBe(403);
+    const session=driver.session();let exported:any;try{exported=await session.executeRead(tx=>service.exportBeeperReadTransport(tx,uid));}finally{await session.close();}expect((exported.connections as any[]).find(c=>c.id===route).network).toBe('imessage');expect((exported.catalogue as any[]).find(c=>c.connectionId===route).network).toBe('imessage');expect((exported.jobs as any[]).find(j=>j.id===read.body.id).network).toBe('imessage');
+    await run('CREATE(:OpenChatImportedChat {id:$id,ownerUserId:$uid,relayConnectionId:$route,chatKey:$selected,network:"whatsapp"})',{id:fixture+'-wrong-network',uid,route,selected});
+    const selectedRows=await request(app).get(p+'/chats').set('Authorization',auth());expect(selectedRows.body.items).toHaveLength(1);expect(selectedRows.body.items[0].importedChatId).toBe(imported.body.chatId);
+    const rows=await run('MATCH(c:OpenChatImportedChat {ownerUserId:$uid,id:$id}) RETURN c.network AS network',{uid,id:imported.body.chatId});
+    expect(rows.records[0]!.get('network')).toBe('imessage');
+    expect((await request(app).delete(p).set('Authorization',auth())).status).toBe(200);
+    expect((await relay('deliver',body)).status).toBe(401);
   });
   it('account deletion removes all new transport records in the owner fence and never affects another owner',async()=>{
     const imported=await import('../src/services/importedChatAccount.js');const s=driver.session();

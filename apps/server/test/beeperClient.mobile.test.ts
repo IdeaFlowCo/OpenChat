@@ -160,6 +160,10 @@ describe('Beeper client explicit source reads', () => {
     const publicOffer = { protocol: 'openchat.beeper.read.v1', destination: 'https://chat.ideaflow.app', connectionId: 'a'.repeat(48), machineKey: 'b'.repeat(64), deviceKey: 'c'.repeat(64), accountKey: 'd'.repeat(64), catalogueGrantId: 'e'.repeat(48), relayTokenHash: 'f'.repeat(64), relayBinding:'0'.repeat(64),ownerUserId:'owner-a', expiresAt: new Date(Date.now() + 3600000).toISOString() };
     expect(() => parsePublicBeeperOffer(JSON.stringify({ ...publicOffer, privateKey: 'never-send' }))).toThrow();
     expect(parsePublicBeeperOffer(JSON.stringify(publicOffer)).destination).toBe('https://chat.ideaflow.app');
+    const imessage={...publicOffer,protocol:'openchat.beeper.imessage.read.v1',network:'imessage'};
+    expect(parsePublicBeeperOffer(JSON.stringify(imessage))).toEqual(imessage);
+    expect(()=>parsePublicBeeperOffer(JSON.stringify({...publicOffer,network:'imessage'}))).toThrow();
+    expect(()=>parsePublicBeeperOffer(JSON.stringify({...publicOffer,protocol:'openchat.beeper.imessage.read.v1'}))).toThrow();
   });
 });
 
@@ -169,4 +173,15 @@ it('does not offer authorization when reservation and selected read kinds differ
 });
 it.each([{...job,id:'substituted-job'},{...job,kind:'earlier'}])('rejects a refetched job that differs from the reserved read before approval',async changed=>{
  m.api.getBeeperReadJob.mockResolvedValue(changed);await render(React.createElement(BeeperReadScreen));expect(buttons('Authorize selected chat read')).toHaveLength(0);expect(m.api.attachBeeperReadIntent).not.toHaveBeenCalled();expect(m.authorize).not.toHaveBeenCalled();expect(m.text.join(' ')).toContain('different read is already pending');
+});
+
+it('names iMessage on the selected-read screen before requesting native authorization',async()=>{
+ const im={...connection,protocol:'openchat.beeper.imessage.read.v1',network:'imessage'};
+ m.api.listBeeperConnections.mockResolvedValue([im]);m.api.getBeeperCatalogue.mockResolvedValue({connection:im,items:[{...entry,network:'imessage'}],nextCursor:null});m.api.requestBeeperRead.mockResolvedValue({...job,network:'imessage'});m.api.getBeeperReadJob.mockResolvedValue({...job,network:'imessage'});
+ await render(React.createElement(BeeperReadScreen));expect(m.text.join(' ')).toContain('iMessage · Only this selected chat');expect(m.authorize).not.toHaveBeenCalled();
+});
+it('distinguishes a confirmed empty Mac report from waiting for the first report without reading messages',async()=>{
+ m.api.getBeeperCatalogue.mockResolvedValue({connection:{...connection,catalogueReportedAt:'2026-11-27T00:00:00Z',catalogueEmpty:true},items:[],nextCursor:null});
+ await render(React.createElement(BeeperChatsScreen));
+ expect(m.text.join(' ')).toContain('Your Mac reported no supported chats');expect(m.api.requestBeeperRead).not.toHaveBeenCalled();
 });

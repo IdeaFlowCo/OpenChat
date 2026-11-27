@@ -33,7 +33,7 @@ export function localKeychainToken({service,account},invoke=runFile){
  };
 }
 function options(argv){
- const [command,...rest]=argv,allowed=new Set(['directory','pairing-directory','connection','pair-route','owner','account','keychain-service','keychain-account','chat','grant']);
+ const [command,...rest]=argv,allowed=new Set(['directory','pairing-directory','connection','pair-route','owner','account','keychain-service','keychain-account','chat','grant','network']);
  const args={};for(let i=0;i<rest.length;i+=2){const key=rest[i]?.slice(2);if(!rest[i]?.startsWith('--')||!allowed.has(key)||!rest[i+1]||Object.hasOwn(args,key))failure();args[key]=rest[i+1];}
  return {command,args};
 }
@@ -56,7 +56,7 @@ export async function main(argv=process.argv.slice(2)){
   if(command==='setup'){
    if(!id(args['pair-route'])||!args.owner||!args.account)failure();
    const keychain={service:args['keychain-service'],account:args['keychain-account']};localKeychainToken(keychain);
-   const approved=await authority.approveCatalogue({pairRoute:args['pair-route'],ownerId:args.owner,accountId:args.account,expiresAt:Date.now()+3600000,destination:'https://chat.ideaflow.app'},confirmBeeperLocally);
+   const approved=await authority.approveCatalogue({pairRoute:args['pair-route'],ownerId:args.owner,accountId:args.account,network:args.network||'whatsapp',expiresAt:Date.now()+3600000,destination:'https://chat.ideaflow.app'},confirmBeeperLocally);
    connectionId=approved.publicOffer.connectionId;
    config={version:1,connectionId,pairRoute:args['pair-route'],accountId:args.account,keychain,relayToken:approved.relayToken};
    const file=join(directory,connectionId+'.json');writeFileSync(file,JSON.stringify(config),{flag:'wx',mode:0o600});
@@ -75,9 +75,9 @@ export async function main(argv=process.argv.slice(2)){
     const chat=await adapter.chat(config.accountId,args.chat),offer=await authority.approveChat(connectionId,chat,confirmBeeperLocally);
     console.log('Encrypted grant for your paired device:');console.log(offer.wire);console.log('Local revoke ID: '+offer.grantId);return;
    }
-   if(!await confirmBeeperLocally({operation:command==='catalogue'?'Publish one bounded chat catalogue page':'Start foreground selected-chat reads',connectionId,destination:'https://chat.ideaflow.app',disclosure:command==='catalogue'?'WhatsApp chat titles, types and activity times':'Only separately approved chat messages and participant attribution; Ctrl-C stops'}))return;
+   if(!await confirmBeeperLocally({operation:command==='catalogue'?'Publish one bounded chat catalogue page':'Start foreground selected-chat reads',connectionId,destination:'https://chat.ideaflow.app',disclosure:command==='catalogue'?'Chat titles, types and activity times from the locally approved network/account':'Only separately approved chat messages and participant attribution; Ctrl-C stops'}))return;
    if(command==='catalogue'){
-    await authority.readCatalogue(connectionId,adapter,(body,beforeFetch)=>transport.publishCatalogue(body,beforeFetch));console.log('One catalogue page published. It may be partial.');return;
+    const result=await authority.readCatalogue(connectionId,adapter,(body,beforeFetch)=>transport.publishCatalogue(body,beforeFetch));console.log(result.count?'One catalogue page published. It may be partial.':'Mac reported no supported chats for this approved network/account on this page. The catalogue may be partial.');return;
    }
    journal=new BeeperForegroundJournal(directory);
    const runner=createBeeperForegroundRunner({connectionId,transport,authority,adapter,journal,signal:abort.signal,onStatus:status=>console.log(status)});

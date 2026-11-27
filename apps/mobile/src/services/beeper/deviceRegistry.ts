@@ -3,8 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { getUser } from '../../api/client';
 import { installReviewedBeeperReadResolver, BeeperSecureGrantRequired } from './readIntent';
 import {
-  protocol,
-  audience,
+  selectionNetwork,
   destination,
   isHex,
   openReadEnvelope,
@@ -22,14 +21,15 @@ const field = (account: string, route: string, chat: string) => {
   if (!/^[A-Za-z0-9_-]{1,120}$/.test(account) || !isHex(route, 48) || !isHex(chat, 64)) return unavailable();
   return 'beeper.read.v1.' + account + '.' + route + '.' + chat;
 };
-type Display = { title: string; chatType: 'direct' | 'group' };
+type Display = { title: string; chatType: 'direct' | 'group'; network?:'whatsapp'|'imessage' };
 function validDisplay(display: Display | undefined): display is Display {
   return (
     !!display &&
     typeof display.title === 'string' &&
     !!display.title.trim() &&
     display.title.length <= 200 &&
-    ['direct', 'group'].includes(display.chatType)
+    ['direct', 'group'].includes(display.chatType) &&
+    (display.network === undefined || ['whatsapp','imessage'].includes(display.network))
   );
 }
 type Entry = {
@@ -94,13 +94,15 @@ function current(s: Selection, p: Awaited<ReturnType<typeof pair>>, account: str
 export async function acceptBeeperReadOffer(
   account: string,
   wire: string,
-  confirm: (scope: Readonly<Selection & Display>) => Promise<boolean>,
+  confirm: (scope: Readonly<Omit<Selection,'network'> & Display>) => Promise<boolean>,
 ) {
-  const p = await pair(account),
-    offer = openReadEnvelope(p, 'grant', wire, p.secret) as { scope?: unknown; display?: Display };
+  const p = await pair(account);
+  let offer: { scope?: unknown; display?: Display };
+  try { offer = openReadEnvelope(p, 'grant', wire, p.secret) as typeof offer; }
+  catch { offer = openReadEnvelope({...p,network:'imessage'}, 'grant', wire, p.secret) as typeof offer; }
   const s = offer?.scope,
     display = offer?.display;
-  if (!validDisplay(display) || !validSelection(s) || !current(s, p, account)) return unavailable();
+  if (!validDisplay(display) || !validSelection(s) || (display.network ?? 'whatsapp') !== selectionNetwork(s) || !current(s, p, account)) return unavailable();
   const key = field(account, s.route, s.chatKey);
   return exclusive(key, async () => {
     if (!(await confirm(Object.freeze({ ...s, ...display }))) || !current(s, await pair(account), account))
@@ -129,6 +131,7 @@ export function enableBeeperReadRegistry(account: string) {
         !enabled ||
         !validDisplay(entry.display) ||
         !current(s, p, account) ||
+        (entry.display.network ?? 'whatsapp') !== selectionNetwork(s) ||
         Object.entries(scope).some(([k, v]) => s[k as keyof Selection] !== v)
       )
         return unavailable();
@@ -145,8 +148,9 @@ export function enableBeeperReadRegistry(account: string) {
             now = Date.now();
           if (
             !sameSelection(initial, s) ||
-            req.protocol !== protocol ||
-            req.audience !== audience ||
+            req.protocol !== s.protocol ||
+            req.audience !== s.audience ||
+            req.network !== s.network ||
             req.destination !== destination ||
             req.operation !== 'readSelected' ||
             req.connectionId !== s.route ||
@@ -199,7 +203,7 @@ export function enableBeeperReadRegistry(account: string) {
             sequence,
             until,
           };
-          const frame = sealReadEnvelope(p, 'read', signed, p.secret, (n) =>
+          const frame = sealReadEnvelope({...p,network:selectionNetwork(s)!}, 'read', signed, p.secret, (n) =>
             Crypto.getRandomValues(new Uint8Array(n)),
           );
           if (frame.length > 3200) return unavailable();

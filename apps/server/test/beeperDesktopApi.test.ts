@@ -61,3 +61,21 @@ describe('Mac-local GET-only Beeper adapter',()=>{
     expect(()=>catalogueEntry({...chat,accountID:'foreign'},opts)).toThrow();
   });
 });
+
+it('maps only an explicitly selected network and refuses automatic merged routing',()=>{
+ const imessage={...chat,network:'iMessage'};
+ expect(()=>catalogueEntry(imessage,opts)).toThrow();
+ expect(()=>catalogueEntry(chat,{...opts,network:'imessage'})).toThrow();
+ expect(()=>catalogueEntry({...imessage,merge:{}},{...opts,network:'imessage'})).toThrow();
+ const batch=importBatch(imessage,{items:[message],hasMore:false},{...opts,network:'imessage'});
+ expect(parseImportPayload(batch.payload).source.network).toBe('imessage');
+ expect(batch.payload.source.accountKey).not.toBe(catalogueEntry(chat,opts).accountKey);
+ const legacy=importBatch(chat,{items:[message],hasMore:false},opts).payload;
+ expect(legacy.source.accountKey).toBe(opaqueBeeperKey(key,'account',accountId));
+ expect(legacy.source.chatKey).toBe(opaqueBeeperKey(key,'chat',accountId,chatId));
+ expect(legacy.participants[0].sourceKey).toBe(opaqueBeeperKey(key,'participant',accountId,chatId,message.senderID));
+ expect(legacy.messages[0].sourceMessageId).toBe(opaqueBeeperKey(key,'message',accountId,chatId,message.id));
+ expect(batch.payload.source.chatKey).not.toBe(legacy.source.chatKey);
+ expect(batch.payload.participants[0].sourceKey).not.toBe(legacy.participants[0].sourceKey);
+ expect(batch.payload.messages[0].sourceMessageId).not.toBe(legacy.messages[0].sourceMessageId);
+});

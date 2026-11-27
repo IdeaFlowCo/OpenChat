@@ -57,6 +57,9 @@ The full client request also includes capability-gated replies and optional
 iMessage. Replies need a durable outbox with stable operation IDs: persist an
 attempt before provider dispatch, pin uncertain attempts to the original Mac,
 and reconcile status rather than retrying through a different Mac. A write
-capability and actual deliberate send need separate local authorization. Native
-iMessage remains an explicit Mac-local provider subtask; there is no silent
-fallback to a Mac database, AppleScript command or generic agent prompt.
+capability and actual deliberate send need separate local authorization. Optional iMessage reads use a distinct network-bound offer, encrypted protocol,
+native intent and opaque identity domain for a separately approved existing Beeper macOS account
+through the same GET-only typed capability. WhatsApp remains the default. This
+source slice does not enable iMessage replies, install an account or grant Mac
+privacy permissions; actual source/device acceptance and delivery remain separate.
+There is no silent fallback to a Mac database, AppleScript command or generic agent prompt.
