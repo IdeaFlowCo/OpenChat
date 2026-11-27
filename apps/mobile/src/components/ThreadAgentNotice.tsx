@@ -15,6 +15,8 @@ export function threadAgentFailureText(code: string | undefined): string {
   if (code === 'rate') return 'Your agent has answered a lot this hour. Try again later.';
   if (code === 'repeat') return 'Your agent already answered this message.';
   if (code === 'unavailable') return 'OpenChat agents are not available right now. Your message was sent.';
+  if (code === 'changed') return 'The chat changed before your agent could answer. Nothing was posted.';
+  if (code === 'named') return 'Here @agent mentions a person, so your agent did not answer. Hold your message and choose Ask my agent.';
   return 'Your agent could not answer. Your message was sent; nothing else was posted.';
 }
 
@@ -23,7 +25,11 @@ export function threadAgentFailureText(code: string | undefined): string {
  * says before sending who will see the answer, and afterwards shows that the
  * agent is working or why it did not answer. Only the sender sees this line.
  */
-export function ThreadAgentNotice({ conversationId, text, onInsert }: { conversationId: string; text: string; onInsert: () => void }) {
+export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = true }: {
+  conversationId: string; text: string; onInsert: () => void;
+  /** False while editing, or where @agent mentions a person: progress and refusals still show. */
+  offerTag?: boolean;
+}) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [status, setStatus] = useState<Status | null>(null);
@@ -32,7 +38,9 @@ export function ThreadAgentNotice({ conversationId, text, onInsert }: { conversa
     const socket = getSocket();
     const onStatus = (payload: Status) => {
       if (payload?.conversationId !== conversationId) return;
-      setStatus(payload.state === 'answered' ? null : payload);
+      // An answer only clears the line for the message it answers, never a newer question's.
+      if (payload.state === 'answered') setStatus(current => (current?.messageId === payload.messageId ? null : current));
+      else setStatus(payload);
     };
     socket?.on('agent-reply:status', onStatus);
     return () => { socket?.off('agent-reply:status', onStatus); };
@@ -45,7 +53,7 @@ export function ThreadAgentNotice({ conversationId, text, onInsert }: { conversa
   }, [status]);
 
   const card = [styles.card, { backgroundColor: c.surface, borderColor: c.border }];
-  if (hasAgentTag(text)) {
+  if (offerTag && hasAgentTag(text)) {
     return <View accessibilityRole="summary" style={card}>
       <AppIcon name="bot" color={c.primary} size={16} />
       <Text style={{ ...type.meta, color: c.textMetadata, flex: 1 }}>
@@ -53,7 +61,7 @@ export function ThreadAgentNotice({ conversationId, text, onInsert }: { conversa
       </Text>
     </View>;
   }
-  if (isTypingAgentTag(text)) {
+  if (offerTag && isTypingAgentTag(text)) {
     return <TouchableOpacity accessibilityRole="button" accessibilityLabel="Tag @agent: ask your agent about this chat" onPress={onInsert} style={card}>
       <AppIcon name="bot" color={c.primary} size={16} />
       <Text style={{ ...type.label, color: c.textPrimary }}>@agent</Text>

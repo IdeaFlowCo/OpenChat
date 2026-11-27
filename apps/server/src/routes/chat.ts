@@ -27,6 +27,7 @@ import { connectorMessageId, parseMessageProvenance, provenanceBelongsToSender, 
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { maybeTriggerThreadAgent } from '../services/threadAgent.js';
+import { isDirectHumanSession } from './profileAgent.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
@@ -1390,7 +1391,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       if (wasCreated) {
         void maybeTriggerThreadAgent({
           driver: getDriver(), io, senderId: userId, conversationId: conversationId as string, messageId: String(message.id), content: messageContent,
-          human: !(req.agentKeyId || req.connectorDelegation || connectorPrincipal || req.user?.embedded),
+          human: isDirectHumanSession(req),
           broadcast: broadcastMessageToParticipants,
         });
       }

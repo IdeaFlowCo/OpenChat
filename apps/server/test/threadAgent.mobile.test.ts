@@ -54,6 +54,21 @@ it('shows only this chat’s progress, explains a refusal in plain words and cle
   expect(screen.toJSON()).toBeNull();
   expect(threadAgentFailureText('surprising <b>server</b> text')).toBe('Your agent could not answer. Your message was sent; nothing else was posted.');
   expect(threadAgentFailureText('unavailable')).toContain('not available');
+  expect(threadAgentFailureText('named')).toContain('mentions a person');
+  expect(threadAgentFailureText('changed')).toContain('chat changed');
+});
+
+it('an answer clears only its own message’s line, and progress shows even where the tag is not offered', async () => {
+  await act(async () => { screen = create(React.createElement(ThreadAgentNotice, { conversationId: 'c', text: '@agent typed while editing', onInsert: vi.fn(), offerTag: false })); });
+  expect(screen.toJSON()).toBeNull();
+  const emit = (payload: unknown) => act(async () => { mocks.handlers.get('agent-reply:status')!(payload); });
+  await emit({ conversationId: 'c', messageId: 'newer', state: 'working' });
+  await emit({ conversationId: 'c', messageId: 'older', state: 'answered' });
+  expect(texts()).toContain('Your agent is reading this chat');
+  await emit({ conversationId: 'c', messageId: 'newer', state: 'answered' });
+  expect(screen.toJSON()).toBeNull();
+  await emit({ conversationId: 'c', messageId: 'm', state: 'failed', code: 'named' });
+  expect(texts()).toContain('Hold your message and choose Ask my agent');
 });
 
 it('“Ask my agent” explains what it reads, asks once as "mine" and never checks someone else’s opt-in', async () => {

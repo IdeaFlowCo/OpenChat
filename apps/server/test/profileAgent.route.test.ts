@@ -9,7 +9,7 @@ vi.mock('../src/lib/ideaflowConnector.js', () => ({ getConnectorPrincipal: () =>
 vi.mock('../src/services/profileAgent.js', async (orig) => ({ ...(await orig<typeof import('../src/services/profileAgent.js')>()), askProfileAgent: mocks.ask }));
 vi.mock('../src/services/threadAgent.js', async (orig) => ({ ...(await orig<typeof import('../src/services/threadAgent.js')>()), askThreadAgent: mocks.askMine }));
 vi.mock('../src/services/autoResponses.js', async (orig) => ({ ...(await orig<typeof import('../src/services/autoResponses.js')>()), createRule: mocks.createRule }));
-import { agentReplyRouter, autoResponsesRouter } from '../src/routes/profileAgent.js';
+import { agentReplyRouter, autoResponsesRouter, isDirectHumanSession } from '../src/routes/profileAgent.js';
 import { ProfileAgentError } from '../src/services/profileAgent.js';
 const app = express().use(express.json());
 app.use((req, _res, next) => { if (req.headers['x-test-agent-key']) (req as any).agentKeyId = 'key'; next(); });
@@ -57,4 +57,11 @@ it('agent:"mine" asks the caller’s own thread agent, for signed-in people only
   expect(mocks.askMine).toHaveBeenCalledOnce();
   const avail = await request(app).get('/api/chat/agent-reply/availability?messageId=m&agent=mine').set('Authorization', auth);
   expect(avail.status).toBe(200); expect(avail.body).toMatchObject({ enabled: true });
+});
+it('only a direct signed-in session counts as a person for the @agent send trigger', () => {
+  const req = (over: Record<string, unknown>) => ({ headers: {}, user: { userId: 'u' }, ...over }) as never;
+  expect(isDirectHumanSession(req({}))).toBe(true);
+  expect(isDirectHumanSession(req({ agentKeyId: 'key' }))).toBe(false);
+  expect(isDirectHumanSession(req({ connectorDelegation: { id: 'd' } }))).toBe(false);
+  expect(isDirectHumanSession(req({ user: { userId: 'u', embedded: 'vision' } }))).toBe(false);
 });

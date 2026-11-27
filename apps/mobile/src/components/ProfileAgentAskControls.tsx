@@ -35,6 +35,7 @@ export function myAgentErrorText(error: unknown): string {
   if (code === 'automatic') return 'Agents do not answer automatic replies.';
   if (code === 'cap') return 'Your agent has used its allowance for this month.';
   if (code === 'repeat') return 'Your agent already answered this message.';
+  if (code === 'changed') return 'The chat changed before your agent could answer. Nothing was posted.';
   if (status === 429) return 'Your agent has answered a lot this hour. Try again later.';
   if (status === 503) return 'OpenChat agents are not available right now.';
   return 'Your agent could not answer. Nothing was posted.';

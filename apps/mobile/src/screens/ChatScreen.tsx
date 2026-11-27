@@ -47,7 +47,7 @@ import { ReactionsBar } from '../components/ReactionsBar';
 import { MessageStatusChips } from '../components/MessageStatusChips';
 import { AutoResponseDraftNotice } from '../components/AutoResponseDraftNotice';
 import { ThreadAgentNotice } from '../components/ThreadAgentNotice';
-import { insertAgentTag } from '../utils/agentTag';
+import { insertAgentTag, isNamedAgent } from '../utils/agentTag';
 import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
@@ -745,8 +745,13 @@ export function ChatScreen({
     [conversation]
   );
   // @agent (openchat-6zn): offered in chats between people, in the Chat lane, when composing a new message.
-  const canTagAgent = activeConversationLane === 'chat' && !!conversationId && !editingMessage
-    && !(!isGroup && other?.isBot) && conversation?.communityKind !== 'announcements';
+  const myAgentAnswersHere = !!conversationId && !(!isGroup && other?.isBot) && conversation?.communityKind !== 'announcements';
+  // Where someone is named "Agent", @agent is their mention: the tag is not offered (Ask my agent still is).
+  const agentIsAPerson = useMemo(
+    () => conversation?.participants?.some(p => p?.user?.id !== currentUser?.userId && !p?.user?.isBot && isNamedAgent(p?.user?.name)) ?? false,
+    [conversation?.participants, currentUser?.userId],
+  );
+  const canTagAgent = myAgentAnswersHere && activeConversationLane === 'chat' && !editingMessage && !agentIsAPerson;
   const tagAgent = useCallback(() => {
     setText(current => insertAgentTag(current));
     setMentionQuery(null);
@@ -2467,7 +2472,7 @@ export function ChatScreen({
       )}
       {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
       {/* @agent: your own agent answers in this chat (openchat-6zn). Not in bot or announcement chats, never while editing. */}
-      {canTagAgent && <ThreadAgentNotice conversationId={conversationId} text={text} onInsert={tagAgent} />}
+      {myAgentAnswersHere && activeConversationLane === 'chat' && <ThreadAgentNotice conversationId={conversationId} text={text} offerTag={canTagAgent} onInsert={tagAgent} />}
 
       {announcementReadOnly ? <View testID="announcements-read-only" style={{ padding: space[4], backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
         <Text style={[type.body, { color: c.textMetadata }]}>Only community admins can post announcements.</Text>
@@ -2650,6 +2655,7 @@ export function ChatScreen({
         onCopiedReference={showToast}
         onStatusSaved={() => { void refreshMessageStatuses(); }}
         onProfileAgentAnswered={() => showToast('Agent answered in this chat')}
+        myAgentAvailable={myAgentAnswersHere}
         onReply={handleReply}
         onTranslate={m => setManualTranslations(previous => ({ ...previous, [m.id]: { content: m.content, version: (previous[m.id]?.version || 0) + 1 } }))}
         translateLanguage={translationPreference.language}

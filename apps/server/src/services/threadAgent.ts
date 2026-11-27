@@ -15,7 +15,9 @@
  *   - the Stream items and Context posts the asker wrote and shared here.
  * It never reads private notes, the private people graph, private message
  * statuses, other conversations, the private assistant's page context, or
- * account fields. loadThreadContext is the only reader.
+ * account fields. loadThreadContext is the only reader. Like an ordinary
+ * send, nothing is read or posted while the asker and anyone else in the chat
+ * have blocked each other.
  *
  * Every message in the thread is untrusted text from some participant. The
  * model has no tools and a short output bound; its reply is post-filtered
@@ -25,7 +27,7 @@
 import type { Driver, ManagedTransaction } from 'neo4j-driver';
 import type { Server as IOServer } from 'socket.io';
 import { assistantTextForMessage } from './assistantContext.js';
-import { checkContextReadAccess } from './contextAccess.js';
+import { acquireContextAclLocks, checkContextReadAccess } from './contextAccess.js';
 import {
   agentLabel, cleanText, generateMeteredReply, isProfileAgentAvailable, LINK_CANDIDATE, loadOwnerSharedInChat,
   MAX_QUESTION_CHARS, normalizeLink, postAutomaticMessage, ProfileAgentError, safeName,
@@ -40,19 +42,33 @@ export const THREAD_LIMITS = {
   /** Total thread text handed to the model; the oldest messages are dropped first. */
   totalChars: 12_000,
   askerPerHour: 20,
+  /** All members together, so a busy group is not flooded with agent replies. */
   conversationPerHour: 8,
+  /** One member cannot use the whole chat's hour. */
+  askerConversationPerHour: 4,
   perMessage: 2,
+  /**
+   * Nobody opts in to @agent, so any account can spend here. Thread answers stop
+   * at this share of the global monthly ceiling; the rest stays for the agents
+   * people turned on for others ("Ask {name}'s agent", auto-reply drafts).
+   */
+  globalShare: 0.6,
 } as const;
+const EMPTY_REPLY = 'I could not find an answer to that in this chat.';
 
 // ── The tag ──────────────────────────────────────────────────────────────────
 /**
  * `@agent` as its own word: at the start or after whitespace/an opening
  * bracket, and not continued by a name character (`@agents`, `@agent-smith`,
- * `@agent_x`) or a second mention sign. Case-insensitive. An e-mail address or
- * `foo@agent` never matches.
+ * `@agent_x`), a dotted handle (`@agent.example`) or a second mention sign.
+ * Case-insensitive. An e-mail address or `foo@agent` never matches.
  */
-const AGENT_TAG = /(^|[\s([{])@agent(?![\w@-])/iu;
-const AGENT_TAG_ALL = /(^|[\s([{])@agent(?![\w@-])/giu;
+const AGENT_TAG = /(^|[\s([{])@agent(?![\w@-]|\.\w)/iu;
+const AGENT_TAG_ALL = /(^|[\s([{])@agent(?![\w@-]|\.\w)/giu;
+/** Cut by whole characters, never through a surrogate pair. */
+const firstChars = (text: string, max: number) => (text.length <= max ? text : Array.from(text).slice(0, max).join(''));
+/** A participant whose name's first word is "agent" owns the `@agent` mention in that chat. */
+const NAMED_AGENT = `toLower(trim(coalesce(p.name,''))) = 'agent' OR toLower(trim(coalesce(p.name,''))) STARTS WITH 'agent '`;
 
 /**
  * Returns the question (the message without the tag) when the text tags the
@@ -87,14 +103,15 @@ export async function loadThreadContext(
     OPTIONAL MATCH (sender:User {id:m.senderId})
     RETURN asker.name AS askerName, coalesce(asker.isBot,false) AS askerIsBot,
       c.type AS type, c.communityKind AS communityKind,
-      // A chat with a bot already has its own agent; a person named "agent…" keeps their own mention.
+      // A chat with a bot already has its own agent.
       EXISTS { MATCH (bot:User)-[:PARTICIPATES_IN]->(c) WHERE coalesce(bot.isBot,false) AND c.type = 'direct' } AS botChat,
-      EXISTS { MATCH (p:User)-[:PARTICIPATES_IN]->(c) WHERE p.id <> $askerId AND toLower(coalesce(p.name,'')) STARTS WITH 'agent' } AS namedAgent,
+      // The same rule as sending: a block in either direction with anyone here means nothing is posted.
+      EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> asker.id AND ((asker)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(asker)) } AS blocked,
       m.content AS text, m.transcript AS transcript, m.attachments AS attachments, m.senderId AS senderId, sender.name AS senderName,
       coalesce(m.viaProfileAgent,false) OR coalesce(m.viaAutoResponse,false) OR coalesce(m.viaSecretary,false) AS automatic
   `, ids);
   const row = base.records[0];
-  if (!row) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
+  if (!row || row.get('blocked')) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (row.get('askerIsBot') || row.get('botChat')) throw new ProfileAgentError(400, 'bot', 'Agents can only be asked about chats between people');
   if (row.get('communityKind') === 'announcements') throw new ProfileAgentError(400, 'announcements', 'Agents do not answer in announcement chats');
   if (row.get('automatic')) throw new ProfileAgentError(400, 'automatic', 'Agents do not answer automatic replies');
@@ -198,14 +215,14 @@ async function checkThreadRateLimits(tx: ManagedTransaction, input: { askerId: s
     OPTIONAL MATCH (a:ProfileAgentRun {askerId:$askerId, purpose:'thread'}) WHERE a.createdAt > datetime($now) - duration('PT1H')
     WITH count(a) AS asker
     OPTIONAL MATCH (c:ProfileAgentRun {conversationId:$conversationId, purpose:'thread'}) WHERE c.createdAt > datetime($now) - duration('PT1H')
-    WITH asker, count(c) AS conversation
+    WITH asker, count(c) AS conversation, sum(CASE WHEN c.askerId = $askerId THEN 1 ELSE 0 END) AS mineHere
     OPTIONAL MATCH (m:ProfileAgentRun {askerId:$askerId, messageId:$messageId, purpose:'thread'})
-    RETURN asker, conversation, count(m) AS perMessage
+    RETURN asker, conversation, mineHere, count(m) AS perMessage
   `, input);
   const row = r.records[0]!;
   const n = (k: string) => Number(row.get(k)?.toNumber?.() ?? row.get(k) ?? 0);
   if (n('perMessage') >= THREAD_LIMITS.perMessage) throw new ProfileAgentError(429, 'repeat', 'Your agent has already answered this message');
-  if (n('asker') >= THREAD_LIMITS.askerPerHour) throw new ProfileAgentError(429, 'rate', 'You have asked your agent a lot this hour. Try again later.');
+  if (n('asker') >= THREAD_LIMITS.askerPerHour || n('mineHere') >= THREAD_LIMITS.askerConversationPerHour) throw new ProfileAgentError(429, 'rate', 'You have asked your agent a lot this hour. Try again later.');
   if (n('conversation') >= THREAD_LIMITS.conversationPerHour) throw new ProfileAgentError(429, 'rate', 'Agents have answered a lot in this chat this hour. Try again later.');
 }
 
@@ -237,11 +254,13 @@ export async function askThreadAgent(input: AskThreadAgentInput) {
 
   const reply = await generateMeteredReply({
     driver: input.driver, askerId: input.askerId, ownerId: input.askerId, conversationId, messageId: input.messageId,
-    question: input.question, purpose: 'thread', rateLimited: false, generate: input.generate,
+    question: input.question, purpose: 'thread', rateLimited: false, generate: input.generate, globalShare: THREAD_LIMITS.globalShare,
     prepare: async (tx, now) => {
+      // The asker's User row is already locked; the conversation row makes the per-chat count exact for concurrent askers.
+      await acquireContextAclLocks(tx, { conversationId });
       const ctx = await loadThreadContext(tx, ids);
       await checkThreadRateLimits(tx, { ...ids, now });
-      return { ctx, prompt: buildThreadPrompt(ctx, input.question), allowedLinks: threadOwnerLinks(ctx) };
+      return { ctx, prompt: buildThreadPrompt(ctx, input.question), allowedLinks: threadOwnerLinks(ctx), emptyReply: EMPTY_REPLY };
     },
   });
   // Everyone sees who prompted the agent. A separately typed question is shown too, never carrying a link.
@@ -252,10 +271,14 @@ export async function askThreadAgent(input: AskThreadAgentInput) {
     ownerId: input.askerId, conversationId, replyToId: input.messageId, content,
     idempotencyKey: `profile-agent:${reply.runId}`,
     props: { viaProfileAgent: true, profileAgentOwnerId: input.askerId, profileAgentAskerId: input.askerId, profileAgentRunId: reply.runId, profileAgentScope: 'thread' },
+    refuseWhenBlocked: true,
   });
-  if (!posted) throw new ProfileAgentError(409, 'unavailable', 'The chat changed before the answer could be posted');
-  if (input.io && input.broadcast) await input.broadcast(input.io, conversationId, posted.message);
-  dispatchMessageEvent(posted.message, posted.participantIds);
+  if (!posted) throw new ProfileAgentError(409, 'changed', 'The chat changed before the answer could be posted');
+  // The answer is stored. A delivery hiccup must not look like a failed ask (a retry would post a second answer).
+  try {
+    if (input.io && input.broadcast) await input.broadcast(input.io, conversationId, posted.message);
+    dispatchMessageEvent(posted.message, posted.participantIds);
+  } catch { console.warn('[thread-agent] delivery after posting failed'); }
   return posted;
 }
 
@@ -283,12 +306,16 @@ export async function maybeTriggerThreadAgent(opts: ThreadAgentTrigger): Promise
     opts.io?.to(`user:${opts.senderId}`).emit('agent-reply:status', { conversationId: opts.conversationId, messageId: opts.messageId, ...status } satisfies ThreadAgentStatus);
   };
   try {
+    const place = await tagPlace(opts.driver, opts.senderId, opts.conversationId);
+    // Silent where the agent never answers and the composer never offers it: no event, no budget, no run.
+    if (place === 'never') return 'skipped';
+    // Here "@agent" mentions a person. Say so, since the same tag answers everywhere else.
+    if (place === 'named') throw new ProfileAgentError(409, 'named', 'In this chat @agent mentions a person');
     if (!isProfileAgentAvailable()) throw new ProfileAgentError(503, 'unavailable', 'OpenChat agents are not available right now');
-    if (await tagNamesAPerson(opts.driver, opts.senderId, opts.conversationId)) return 'skipped';
     tell({ state: 'working' });
     await askThreadAgent({
       driver: opts.driver, io: opts.io, askerId: opts.senderId, messageId: opts.messageId,
-      question: tag.question.slice(0, MAX_QUESTION_CHARS) || undefined, tagged: true, generate: opts.generate, broadcast: opts.broadcast,
+      question: firstChars(tag.question, MAX_QUESTION_CHARS) || undefined, tagged: true, generate: opts.generate, broadcast: opts.broadcast,
     });
     tell({ state: 'answered' });
     return 'answered';
@@ -300,17 +327,17 @@ export async function maybeTriggerThreadAgent(opts: ThreadAgentTrigger): Promise
   }
 }
 
-/** In a chat with a participant whose name starts with "agent", `@agent` is that person's mention. */
-async function tagNamesAPerson(driver: Driver, senderId: string, conversationId: string): Promise<boolean> {
+/** Where the tag was sent: a chat the agent answers in, one it never does, or one where "@agent" is a person. */
+async function tagPlace(driver: Driver, senderId: string, conversationId: string): Promise<'ok' | 'never' | 'named'> {
   const session = driver.session();
   try {
     const r = await session.run(`
       MATCH (:User {id:$senderId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
-      RETURN EXISTS { MATCH (p:User)-[:PARTICIPATES_IN]->(c) WHERE p.id <> $senderId AND toLower(coalesce(p.name,'')) STARTS WITH 'agent' } AS named,
+      RETURN EXISTS { MATCH (p:User)-[:PARTICIPATES_IN]->(c) WHERE p.id <> $senderId AND NOT coalesce(p.isBot,false) AND (${NAMED_AGENT}) } AS named,
         EXISTS { MATCH (bot:User)-[:PARTICIPATES_IN]->(c) WHERE coalesce(bot.isBot,false) AND c.type = 'direct' } AS botChat,
         coalesce(c.communityKind,'') = 'announcements' AS announcements`, { senderId, conversationId });
     const row = r.records[0];
-    // Silent in places the agent never answers: no status event, no budget, no run.
-    return !row || row.get('named') === true || row.get('botChat') === true || row.get('announcements') === true;
+    if (!row || row.get('botChat') === true || row.get('announcements') === true) return 'never';
+    return row.get('named') === true ? 'named' : 'ok';
   } finally { await session.close(); }
 }

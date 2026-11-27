@@ -13,8 +13,10 @@ import {
  * Human sessions only: an API key or connector cannot spend someone's agent
  * budget, change rules, or approve drafts on a person's behalf.
  */
+export const isDirectHumanSession = (req: Request): boolean =>
+  !(req.agentKeyId || req.connectorDelegation || getConnectorPrincipal(req) || req.user?.embedded);
 const humanOnly = (req: Request, res: Response, next: NextFunction) => {
-  if (req.agentKeyId || req.connectorDelegation || getConnectorPrincipal(req) || req.user?.embedded) {
+  if (!isDirectHumanSession(req)) {
     res.status(403).json({ error: 'A direct signed-in session is required' }); return;
   }
   next();

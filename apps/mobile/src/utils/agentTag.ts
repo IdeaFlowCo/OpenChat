@@ -4,11 +4,22 @@
  * these helpers only drive the composer hint and must match
  * `apps/server/src/services/threadAgent.ts` (`parseAgentTag`).
  */
-const AGENT_TAG = /(^|[\s([{])@agent(?![\w@-])/iu;
+const AGENT_TAG = /(^|[\s([{])@agent(?![\w@-]|\.\w)/iu;
+/** The server ignores the tag in longer text. */
+const MAX_TAGGED_LENGTH = 20_000;
 
 /** True when sending this text would ask the agent. */
 export function hasAgentTag(text: string): boolean {
-  return AGENT_TAG.test(text);
+  return text.length <= MAX_TAGGED_LENGTH && AGENT_TAG.test(text);
+}
+
+/**
+ * A participant whose name's first word is "agent" owns the `@agent` mention in
+ * that chat, so the tag is not offered there (the server applies the same rule).
+ */
+export function isNamedAgent(name: string | null | undefined): boolean {
+  const lower = (name ?? '').trim().toLowerCase();
+  return lower === 'agent' || lower.startsWith('agent ');
 }
 
 /**

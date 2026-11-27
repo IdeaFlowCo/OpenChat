@@ -37,7 +37,7 @@ integration('@agent answers about the thread from what everyone in it can read',
   const trigger = (messageId: string, sender: string, content: string, chat = 'chat', human = true) => thread.maybeTriggerThreadAgent({
     driver, io, senderId: id(sender), conversationId: id(chat), messageId, content, human, generate, broadcast,
   });
-  const clearRuns = () => run('MATCH (r:ProfileAgentRun) WHERE r.askerId IN $ids DETACH DELETE r', { ids: [id('sam'), id('ana'), id('cal')] });
+  const clearRuns = () => run('MATCH (r:ProfileAgentRun) WHERE r.askerId IN $ids OR r.ownerId IN $ids DETACH DELETE r', { ids: [id('sam'), id('ana'), id('cal'), id('eve')] });
 
   beforeAll(async () => {
     process.env.NEO4J_URI = uri!; process.env.NEO4J_USER = user!; process.env.NEO4J_PASSWORD = password!;
@@ -53,10 +53,12 @@ integration('@agent answers about the thread from what everyone in it can read',
     await (await import('../src/services/autoResponses.js')).ensureProfileAgentIndexes(driver);
     await run(`
       CREATE (sam:User {id:$sam, name:'Sam Synthetic', email:'PRIVATE-CANARY-EMAIL@example.test', profileStatusText:'PRIVATE-CANARY-STATUS', fixture:$fixture})
-      CREATE (ana:User {id:$ana, name:'Ana Synthetic', fixture:$fixture})
+      CREATE (ana:User {id:$ana, name:'Ana Synthetic', profileAgentEnabled:true, fixture:$fixture})
       CREATE (cal:User {id:$cal, name:'Cal Synthetic', fixture:$fixture})
       CREATE (bot:User {id:$bot, name:'Bot', isBot:true, fixture:$fixture})
-      CREATE (agentina:User {id:$agentina, name:'Agentina Synthetic', fixture:$fixture})
+      CREATE (agentina:User {id:$agentina, name:'Agent Synthetic', fixture:$fixture})
+      CREATE (eve:User {id:$eve, name:'Eve Synthetic', fixture:$fixture})
+      CREATE (trio:Conversation {id:$trio, type:'group', fixture:$fixture})
       CREATE (chat:Conversation {id:$chat, type:'direct', fixture:$fixture})
       CREATE (other:Conversation {id:$other, type:'direct', fixture:$fixture})
       CREATE (botChat:Conversation {id:$botChat, type:'direct', fixture:$fixture})
@@ -67,6 +69,8 @@ integration('@agent answers about the thread from what everyone in it can read',
       CREATE (sam)-[:PARTICIPATES_IN]->(botChat)<-[:PARTICIPATES_IN]-(bot)
       CREATE (sam)-[:PARTICIPATES_IN]->(group)<-[:PARTICIPATES_IN]-(agentina)
       CREATE (sam)-[:PARTICIPATES_IN]->(news)
+      CREATE (sam)-[:PARTICIPATES_IN]->(trio)<-[:PARTICIPATES_IN]-(eve)
+      CREATE (cal)-[:PARTICIPATES_IN]->(trio)
       CREATE (sam)-[:HAS_ADDME_CARD]->(:AddMeCard {token:$token, headline:'PRIVATE-CANARY-CARD-HEADLINE', showHeadline:true, fixture:$fixture})
       CREATE (shared:Thought {id:$shared, userId:$sam, text:'SHARED-NOTE: budget sheet is in the team folder', kind:'fact', fixture:$fixture})
       CREATE (sam)-[:HAS_THOUGHT]->(shared)-[:PINNED_IN {pinnedBy:$sam, pinnedAt:datetime()}]->(chat)
@@ -84,7 +88,7 @@ integration('@agent answers about the thread from what everyone in it can read',
       CREATE (:OverlayEntity {id:$entity, ownerUserId:$sam, name:'PRIVATE-CANARY-PRIVATE-NAME-FOR-ANA', notes:'PRIVATE-CANARY-PRIVATE-GRAPH', fixture:$fixture})
       CREATE (:PrivateContactName {ownerId:$sam, targetId:$ana, name:'PRIVATE-CANARY-CONTACT-NAME', fixture:$fixture})
     `, {
-      sam: id('sam'), ana: id('ana'), cal: id('cal'), bot: id('bot'), agentina: id('agentina'), chat: id('chat'), other: id('other'), botChat: id('botChat'),
+      sam: id('sam'), ana: id('ana'), cal: id('cal'), bot: id('bot'), agentina: id('agentina'), eve: id('eve'), trio: id('trio'), chat: id('chat'), other: id('other'), botChat: id('botChat'),
       group: id('group'), news: id('news'), token: id('card'), shared: id('shared'), private: id('private'), elsewhere: id('elsewhere'), anaPin: id('anaPin'),
       status: id('status'), ctx: id('ctx'), ctxOther: id('ctxOther'), sec: id('sec'), note: id('note'), entity: id('entity'),
     });
@@ -100,7 +104,7 @@ integration('@agent answers about the thread from what everyone in it can read',
   afterAll(async () => {
     if (!driver) return;
     await clearRuns();
-    await run('MATCH (m:Message) WHERE m.conversationId IN $chats DETACH DELETE m', { chats: ['chat', 'other', 'botChat', 'group', 'news'].map(id) });
+    await run('MATCH (m:Message) WHERE m.conversationId IN $chats DETACH DELETE m', { chats: ['chat', 'other', 'botChat', 'group', 'news', 'trio'].map(id) });
     await run('MATCH (n {fixture:$fixture}) DETACH DELETE n');
     await driver.close(); await db.closeDatabase();
   });
@@ -157,15 +161,94 @@ integration('@agent answers about the thread from what everyone in it can read',
     expect(await trigger(q, 'sam', 'the agents are here')).toBe('skipped');
     const b = await send('b1', 'sam', '@agent hello', 'botChat');
     expect(await trigger(b, 'sam', '@agent hello', 'botChat')).toBe('skipped');
-    const g = await send('g1', 'sam', '@agent hello', 'group');
-    expect(await trigger(g, 'sam', '@agent hello', 'group')).toBe('skipped');
     const n = await send('n1', 'sam', '@agent hello', 'news');
     expect(await trigger(n, 'sam', '@agent hello', 'news')).toBe('skipped');
     // Someone who is not in the chat cannot make an agent read it.
     expect(await trigger(q, 'cal', '@agent hello')).toBe('skipped');
     expect(prompts).toHaveLength(0); expect(broadcasts).toHaveLength(0); expect(events).toHaveLength(0);
+    // Where a participant is named "Agent", the tag is their mention: the sender is told why, and nothing runs.
+    const g = await send('g1', 'sam', '@agent hello', 'group');
+    expect(await trigger(g, 'sam', '@agent hello', 'group')).toBe('failed');
+    expect(events.map(e => e.payload)).toEqual([{ conversationId: id('group'), messageId: g, state: 'failed', code: 'named' }]);
+    expect(prompts).toHaveLength(0); expect(broadcasts).toHaveLength(0);
     const runs = await run('MATCH (r:ProfileAgentRun) WHERE r.askerId IN $ids RETURN count(r) AS n', { ids: [id('sam'), id('cal')] });
     expect(runs.records[0]!.get('n').toNumber()).toBe(0);
+  });
+
+  it('a block with anyone in the chat stops “Ask my agent”, as it stops an ordinary send', async () => {
+    const ask = (who: string, messageId: string) => thread.askThreadAgent({ driver, askerId: id(who), messageId, question: 'PROBE text for the blocked person', generate, io, broadcast });
+    const old = await send('t1', 'cal', 'Synthetic: trio plans', 'trio');
+    await run('MATCH (e:User {id:$eve}),(c:User {id:$cal}) CREATE (e)-[:BLOCKED]->(c)', { eve: id('eve'), cal: id('cal') });
+    try {
+      // Cal is blocked by Eve; Eve blocked Cal. Neither may post through an agent. Sam, who blocked nobody, may.
+      await expect(ask('cal', old)).rejects.toMatchObject({ statusCode: 404, code: 'unavailable' });
+      await expect(ask('eve', old)).rejects.toMatchObject({ statusCode: 404, code: 'unavailable' });
+      expect(prompts).toHaveLength(0); expect(broadcasts).toHaveLength(0);
+      await expect(ask('sam', old)).resolves.toBeDefined();
+      // A block made while the model is working still stops the post.
+      await run('MATCH (e:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') });
+      const racing = thread.askThreadAgent({ driver, askerId: id('cal'), messageId: old, io, broadcast, generate: async prompt => {
+        await run('MATCH (e:User {id:$eve}),(c:User {id:$cal}) CREATE (e)-[:BLOCKED]->(c)', { eve: id('eve'), cal: id('cal') });
+        return generate(prompt);
+      } });
+      await expect(racing).rejects.toMatchObject({ statusCode: 409, code: 'changed' });
+      expect(broadcasts).toHaveLength(1);
+    } finally { await run('MATCH (:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') }); }
+  });
+
+  it('says a thread-appropriate line when hygiene leaves nothing, and reports “changed” when the message is deleted meanwhile', async () => {
+    nextReply = "🤖 Sam's OpenChat agent";
+    const q = await send('e1', 'sam', '@agent anything?');
+    await trigger(q, 'sam', '@agent anything?');
+    expect(String(broadcasts[0]!.content).split('\n').slice(3).join('\n')).toBe('I could not find an answer to that in this chat.');
+    events.length = 0; broadcasts.length = 0;
+    const d = await send('e2', 'sam', '@agent then I delete this');
+    const result = await thread.maybeTriggerThreadAgent({ driver, io, senderId: id('sam'), conversationId: id('chat'), messageId: d, content: '@agent then I delete this', human: true, broadcast,
+      generate: async prompt => { await run('MATCH (m:Message {id:$d}) SET m.deletedAt = datetime(), m.content = "Message deleted"', { d }); return generate(prompt); } });
+    expect(result).toBe('failed');
+    expect(events.at(-1)!.payload).toMatchObject({ state: 'failed', code: 'changed' });
+    expect(broadcasts).toHaveLength(0);
+  });
+
+  it('keeps its own hourly limits: @agent and “Ask {name}’s agent” never use up each other’s', async () => {
+    const mk = (n: number, props: string, prefix: string) => run(`UNWIND range(1, $n) AS i CREATE (:ProfileAgentRun {id:$prefix + toString(i), ${props}, status:'answered', createdAt:datetime(), fixture:$fixture})`,
+      { n, prefix: id(prefix), sam: id('sam'), ana: id('ana'), other: id('other'), trio: id('trio') });
+    // 19 thread answers by Sam elsewhere: one more is allowed, and asking Ana's agent is unaffected (its limit is 10).
+    await mk(19, "askerId:$sam, ownerId:$sam, conversationId:$other, messageId:'x', purpose:'thread'", 'lim-a-');
+    const viaAna = await agent.askProfileAgent({ driver, askerId: id('sam'), messageId: id('a1'), generate, io, broadcast });
+    expect(String((viaAna.message as any).content)).toContain("Ana Synthetic's OpenChat agent");
+    const q = await send('l1', 'sam', '@agent twentieth');
+    expect(await trigger(q, 'sam', '@agent twentieth')).toBe('answered');
+    const r = await send('l2', 'sam', '@agent twenty-first');
+    expect(await trigger(r, 'sam', '@agent twenty-first')).toBe('failed');
+    expect(events.at(-1)!.payload).toMatchObject({ code: 'rate' });
+    await clearRuns();
+    // 40 people asking Sam's agent in an hour (the owner limit) do not stop Sam's own @agent.
+    await mk(40, "askerId:$ana, ownerId:$sam, conversationId:$other, messageId:'y', purpose:'answer'", 'lim-b-');
+    expect(await trigger(r, 'sam', '@agent twenty-first')).toBe('answered');
+    await clearRuns();
+    // One member may use half of a chat's hour, not all of it.
+    await mk(thread.THREAD_LIMITS.askerConversationPerHour, "askerId:$sam, ownerId:$sam, conversationId:$trio, messageId:'z', purpose:'thread'", 'lim-c-');
+    const t = await send('l3', 'sam', '@agent trio', 'trio');
+    expect(await trigger(t, 'sam', '@agent trio', 'trio')).toBe('failed');
+    expect(events.at(-1)!.payload).toMatchObject({ code: 'rate' });
+    const c = await send('l4', 'cal', '@agent trio too', 'trio');
+    expect(await trigger(c, 'cal', '@agent trio too', 'trio')).toBe('answered');
+  });
+
+  it('stops at its share of the global ceiling, leaving the rest for agents people turned on', async () => {
+    const month = agent.monthKey();
+    const before = await run(`MATCH (g:ProfileAgentBudget {id:'global'}) RETURN g.month AS month, g.spentMicros AS spent`);
+    await run(`MATCH (g:ProfileAgentBudget {id:'global'}) SET g.month=$month, g.spentMicros=$spent`, { month, spent: Math.floor(agent.globalMonthlyCapMicros() * thread.THREAD_LIMITS.globalShare) });
+    try {
+      const q = await send('gs1', 'sam', '@agent share probe');
+      expect(await trigger(q, 'sam', '@agent share probe')).toBe('failed');
+      expect(events.at(-1)!.payload).toMatchObject({ code: 'cap' });
+      expect(prompts).toHaveLength(0);
+      await expect(agent.askProfileAgent({ driver, askerId: id('sam'), messageId: id('a1'), generate, io, broadcast })).resolves.toBeDefined();
+    } finally {
+      await run(`MATCH (g:ProfileAgentBudget {id:'global'}) SET g.month=$month, g.spentMicros=$spent`, { month: before.records[0]?.get('month') ?? month, spent: before.records[0]?.get('spent') ?? 0 });
+    }
   });
 
   it('“Ask my agent” on a message refuses outsiders, deleted and automatic messages and answers with the typed question shown', async () => {

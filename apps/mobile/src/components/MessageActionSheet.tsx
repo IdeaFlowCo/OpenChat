@@ -97,6 +97,8 @@ interface Props {
   onStatusSaved?: () => void;
   /** The author's built-in agent answered in this chat (Ask {name}'s agent). */
   onProfileAgentAnswered?: () => void;
+  /** This chat is one where your own agent answers (not a bot or announcement chat). */
+  myAgentAvailable?: boolean;
 }
 
 const REPORT_REASONS = ['Spam', 'Inappropriate', 'Abuse', 'Other'] as const;
@@ -126,6 +128,7 @@ export function MessageActionSheet({
   onTickle,
   onStatusSaved,
   onProfileAgentAnswered,
+  myAgentAvailable = false,
   translateLanguage = 'English',
 }: Props) {
   const { scheme } = useTheme();
@@ -151,7 +154,7 @@ export function MessageActionSheet({
   const canAskAuthorsAgent = !!message && !isOwn && !message.deletedAt && !message.sender?.isBot
     && !message.viaProfileAgent && !message.viaAutoResponse && !message.viaSecretary && !message.id.startsWith('local-');
   // Ask my own agent about the thread: offered on my own real messages (other people's offer their agent).
-  const canAskMyAgent = !!message && isOwn && !message.deletedAt && !message.sender?.isBot
+  const canAskMyAgent = !!message && isOwn && myAgentAvailable && !message.deletedAt && !message.sender?.isBot
     && !message.viaProfileAgent && !message.viaAutoResponse && !message.viaSecretary && !message.id.startsWith('local-');
   const handleDismiss = () => {
     setSubSheet(null);
