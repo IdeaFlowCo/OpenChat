@@ -13,6 +13,7 @@ import { createThoughtsFromMessageTags } from '../services/extractThoughtsFromMe
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { maybeTriggerThreadAgent } from '../services/threadAgent.js';
+import { MESSAGE_ID_BELONGS_TO_SEND, MESSAGE_ID_IN_USE, parseClientMessageId } from '../services/messageId.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { resolveMentionedUserIds } from '../services/messageMentions.js';
 import { scheduleVisionReplyDelivery } from '../services/visionBridge.js';
@@ -197,6 +198,11 @@ export function setupChatSocket(io: Server): void {
         callback?.({ error: emojiSize.error });
         return;
       }
+      const clientMessageId = parseClientMessageId(data.id);
+      if (!clientMessageId.ok) {
+        callback?.({ error: clientMessageId.error });
+        return;
+      }
 
       const session = getDriver().session();
       try {
@@ -236,7 +242,7 @@ export function setupChatSocket(io: Server): void {
         // duplicate send (e.g. WS ack lost -> client retries over REST) collapse
         // to one row instead of persisting twice with different ids. See
         // OpenChat-60y. Fall back to a server id for older clients.
-        const messageId = (typeof data.id === 'string' && data.id) || nanoid();
+        const messageId = clientMessageId.id || nanoid();
         const now = new Date().toISOString();
 
         // --- Mention parsing (OpenChat-0jy), shared with the REST path ---
@@ -257,11 +263,18 @@ export function setupChatSocket(io: Server): void {
             m.emojiSize = $emojiSize,
             m.createdAt = datetime($now),
             m._created = true
+          WITH c, sender, m
+          // openchat-dkv: an id that already names a message is only a retry of this
+          // sender's own message here. Otherwise no row: nothing is linked or returned.
+          WHERE ${MESSAGE_ID_BELONGS_TO_SEND}
           MERGE (m)-[:IN_CONVERSATION]->(c)
           MERGE (sender)-[:SENT]->(m)
-          SET c.updatedAt = datetime($now),
-              c.lastMessageAt = datetime($now),
-              c.lastMessagePreview = left(m.content, 100)
+          // Only a new message moves the chat: a late retry of an older send must not
+          // put its text back in the preview or re-sort the chat (as on the REST path).
+          FOREACH (_ IN CASE WHEN coalesce(m._created, false) THEN [1] ELSE [] END |
+            SET c.updatedAt = datetime($now),
+                c.lastMessageAt = datetime($now),
+                c.lastMessagePreview = left(m.content, 100))
           WITH c, m, sender, coalesce(m._created, false) AS wasCreated
           REMOVE m._created
           WITH c, m, sender, wasCreated
@@ -304,6 +317,10 @@ export function setupChatSocket(io: Server): void {
           return persist(tx);
         },[userId]) : await persist(session);
 
+        if (result.records.length === 0) {
+          callback?.({ error: MESSAGE_ID_IN_USE });
+          return;
+        }
         const message = convertToJS(result.records[0].get('message'));
         const participantIds = result.records[0].get('participantIds') as string[];
         const wasCreated = result.records[0].get('wasCreated') === true;

@@ -12,6 +12,17 @@ An API key's existence is never displayed as proof that a dot or MCP host is
 connected. Settings retains API key management and explicit creation/copy of
 manual-agent setup. Existing keys remain repeatedly copyable.
 
+Where the full row shows (Settings, Profile, Agent keys), **Connect Claude** sits
+under it: one tap opens Claude's documented Add custom connector link,
+`https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Ideaflow&connectorUrl=https%3A%2F%2Fid.ideaflow.app%2Fmcp`
+(`apps/mobile/src/utils/claudeConnector.ts`), in the system browser. On iOS it
+asks Safari first (`x-safari-https://…`, iOS 17+) and falls back to the plain
+link, because Claude's phone apps cannot add connectors. Claude still shows the
+dialog for the person to confirm, and Ideaflow ID asks for consent; the link
+grants nothing by itself. When the Ideaflow connector is listed in Claude's
+directory, point this at its `https://claude.ai/directory/connectors/<slug>`
+page instead. A one-line note gives ChatGPT users the same connector URL where their plan allows custom connectors.
+
 Unlinked and Notestream Vision should use the same label and destination in
 their account/navigation utility areas. Avoid separate product connectors or
 competing hero cards. Preserve each product's established typography, surfaces,

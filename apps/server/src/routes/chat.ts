@@ -28,6 +28,7 @@ import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
 import { maybeTriggerThreadAgent } from '../services/threadAgent.js';
 import { isDirectHumanSession } from './profileAgent.js';
+import { MESSAGE_ID_BELONGS_TO_SEND, MESSAGE_ID_IN_USE, parseClientMessageId } from '../services/messageId.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
@@ -1037,6 +1038,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   const idempotentSend = Boolean(req.connectorDelegation || connectorPrincipal);
   const provenance = parseMessageProvenance(rawProvenance);
   if (provenance === 'invalid') { res.status(400).json({ error: 'Invalid message provenance' }); return; }
+  // Connector and delegated sends derive their id on the server; anyone else may offer one as a retry key.
+  const clientMessageId = parseClientMessageId(idempotentSend ? undefined : clientId);
+  if (!clientMessageId.ok) { res.status(400).json({ error: clientMessageId.error }); return; }
   if (assistantScope !== undefined && !['conversation','universal'].includes(assistantScope)) { res.status(400).json({error:'Invalid assistant context'}); return; }
 
   if (req.connectorDelegation && (
@@ -1161,7 +1165,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         req.connectorDelegation.openChatUserId, clientRequestId])).digest('hex')
       : connectorPrincipal
         ? connectorMessageId(userId, conversationId as string, clientRequestId as string)
-        : (typeof clientId === 'string' && clientId) || nanoid();
+        : clientMessageId.id || nanoid();
     const now = new Date().toISOString();
     // Use caption or fallback for preview
     const messageContent = hasContent ? (idempotentSend ? content as string : (content as string).trim()) : '';
@@ -1212,8 +1216,9 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
         m.createdAt = datetime($now),
         m._created = true
       WITH c, sender, m
-      WHERE NOT $delegated OR (m.senderId = $senderId
-        AND m.conversationId = $conversationId AND m.content = $content)
+      // openchat-dkv: an id that already names a message is only a retry of this
+      // sender's own message here. Otherwise no row: nothing is linked or returned.
+      WHERE ${MESSAGE_ID_BELONGS_TO_SEND} AND (NOT $delegated OR m.content = $content)
       MERGE (m)-[:IN_CONVERSATION]->(c)
       MERGE (sender)-[:SENT]->(m)
       FOREACH (_ IN CASE WHEN coalesce(m._created, false) THEN [1] ELSE [] END |
@@ -1274,8 +1279,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       return persist(tx);
     },[userId]) : await persist(session);
 
-    if (idempotentSend && result.records.length === 0) {
-      res.status(409).json({ error: 'Idempotency key already used' });
+    if (result.records.length === 0) {
+      res.status(409).json({ error: idempotentSend ? 'Idempotency key already used' : MESSAGE_ID_IN_USE });
       return;
     }
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
