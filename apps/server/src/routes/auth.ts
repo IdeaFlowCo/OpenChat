@@ -2,6 +2,7 @@ import {prepareCommunityAccountDeletion} from '../services/communities.js';
 import { publishConversationEvent } from '../services/conversationEvents.js';
 import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
+import { deleteBeeperReadTransport,exportBeeperReadTransport } from '../services/beeperRelay.js';
 import { securityEvent } from '../services/securityEvent.js';
 import { deleteHostedContextForUser } from '../services/contextHosted.js';
 import { deleteProfileAgentDataForUser } from '../services/autoResponses.js';
@@ -891,6 +892,7 @@ router.get('/export', requireAuth, requireDirectSession, async (req: Request, re
     // Private notes, importance, cadence and links are the owner's data too.
     const privateGraph = await exportPrivateGraph(userId).catch(() => ({ cards: [], notes: [], things: [], links: [], unavailable: true }));
     const importedChats = await session.executeRead(tx => exportImportedChatsForUser(tx, userId));
+    const beeperConnections = await session.executeRead(tx => exportBeeperReadTransport(tx,userId));
 
     const exportedAt = new Date().toISOString();
     sendJsonDownload(res, `openchat-account-${range}.json`, {
@@ -914,6 +916,7 @@ router.get('/export', requireAuth, requireDirectSession, async (req: Request, re
       intents: ((toJS(record.get('intents')) as unknown[] | undefined) ?? []).filter(Boolean),
       privateGraph,
       importedChats: toJS(importedChats),
+      beeperConnections:toJS(beeperConnections),
       socialPreferences: (toJS(record.get('socialPreferences')) as Record<string, unknown> | null) ?? {
         experienceMode: 'enhanced',
         networkPaused: false,
@@ -1616,6 +1619,7 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
       // 2g. Private graph: this person's own notes and links, and other people's about them.
       await deletePrivateGraphForUser(tx, userId);
       await deleteImportedChatsForUser(tx, userId);
+      await deleteBeeperReadTransport(tx,userId);
 
       // 3. Delete the User node (and all its relationships).
       await tx.run(`

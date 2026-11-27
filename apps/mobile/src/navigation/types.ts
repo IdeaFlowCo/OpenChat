@@ -66,8 +66,10 @@ export type RootStackParamList = {
   /** People whose catch-up date has passed. */
   CatchUp: undefined;
   /** The owner's private, read-only copies of chats from other networks (OpenChat-061g). */
+  BeeperChats: undefined;
+  BeeperRead: { connectionId: string; chatKey: string; kind: import('../api/client').BeeperReadKind; requestRevision?: string };
   ImportedChats: undefined;
-  ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' | 'memory' };
+  ImportedChat: { chatId: string; title?: string; tab?: 'conversation' | 'people' | 'asks' | 'memory'; beeper?: { connectionId: string; chatKey: string; jobId?: string } };
   /** A small, evidenced profile of one person in an imported chat. */
   ImportedPerson: { chatId: string; participantId: string };
   /** Agent API keys list (OpenChat-7c9). */

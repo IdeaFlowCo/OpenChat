@@ -1,6 +1,7 @@
 import { MachineAgentLink } from './MachineAgentLink';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 import { ContextReviewLink } from './ContextReviewLink';
+import { BeeperChatsLink } from './BeeperChatsLink';
 import { ImportedChatsLink } from './ImportedChatsLink';
 import { ConnectAgentLink } from './ConnectAgentLink';
 /**
@@ -231,7 +232,8 @@ export function ConversationList({ activeId, onSelect, onStartChat, compact, onC
       style={{ backgroundColor: c.background }}
       data={orderedConversations}
       keyExtractor={item => item.id}
-      ListHeaderComponent={<><View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{!compact && <ConnectAgentLink />}{!isUnlinkedEmbed() && <MachineAgentLink />}<ContextReviewLink compact={compact} />{!isUnlinkedEmbed() && <ImportedChatsLink variant={compact ? 'compact' : 'link'} />}</View>{onCreateStory && onOpenStory && onOpenReview ? (
+      ListHeaderComponent={<><View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{!compact && <ConnectAgentLink />}{!isUnlinkedEmbed() && <MachineAgentLink />}<ContextReviewLink compact={compact} />{!isUnlinkedEmbed() && <BeeperChatsLink compact={compact} />}
+{!isUnlinkedEmbed() && <ImportedChatsLink variant={compact ? 'compact' : 'link'} />}</View>{onCreateStory && onOpenStory && onOpenReview ? (
         <StoriesStrip
           compact={compact}
           onCreate={onCreateStory}

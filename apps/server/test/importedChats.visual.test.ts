@@ -1,4 +1,5 @@
 import React from 'react';
+vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-source-refresh' }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRegistry } from 'react-native-web';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ vi.mock('react', async (original) => {
   return { ...react, useSyncExternalStore: (subscribe: any, snapshot: any) => react.useSyncExternalStore(subscribe, snapshot, snapshot) };
 });
 vi.mock('react-native', async () => await import('react-native-web'));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ isIdentityVerified: true, currentUser: { userId: 'synthetic-owner' } }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({}), useRoute: () => ({ params: {} }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: {} }));
