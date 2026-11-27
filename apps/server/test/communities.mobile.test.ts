@@ -132,3 +132,11 @@ describe('community client access and explicit actions', () => {
     expect(m.navigation.navigate).not.toHaveBeenCalled();
   });
 });
+
+it('keeps an ownerless archived community readable while hiding invites and new child joins',async()=>{
+ m.api.getCommunity.mockResolvedValue({...detail('member'),state:'archived'});
+ await render(React.createElement(CommunityScreen));
+ expect(m.renderedText.join(' ')).toContain('archived');
+ expect(button('Join group')?.props.disabled).toBe(true);
+ expect(button('Create invite')).toBeUndefined();expect(button('Add group')).toBeUndefined();
+});

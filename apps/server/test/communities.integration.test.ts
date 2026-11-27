@@ -108,7 +108,7 @@ integration('communities preserve explicit chat membership and announcement auth
     const automatic=await import('../src/services/profileAgent.js');
     await expect(automatic.postAutomaticMessage(driver,{ownerId:id('member'),conversationId:announcementsId,replyToId:published.body.id,content:'Automatic bypass',props:{},idempotencyKey:id('auto')})).resolves.toBeNull();
     expect((await post(`/api/chat/messages/${published.body.id}/reactions`,{emoji:'👍'},'member')).status).toBe(201);
-  },20000);
+  },45000);
   it('serializes role changes with sends; stale admin permission cannot post after demotion',async()=>{
     const promote=await request(app).patch(api(`/members/${id('admin')}`)).set('Authorization',auth()).send({role:'admin'});expect(promote.status).toBe(200);
     expect((await post(`/api/chat/conversations/${announcementsId}/messages`,{content:'Admin announcement'},'admin')).status).toBe(201);

@@ -143,7 +143,7 @@ function ConversationContentSession({ conversationId, accountId }: { conversatio
     {creatingPrivate && <ConversationEntryEditor conversationId={conversationId} onCancel={() => setCreatingPrivate(false)} onDone={() => { setCreatingPrivate(false); void load(); }} />}
     {feedback && <Text accessibilityRole={feedback.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={{ color: feedback.error ? c.danger : c.textMetadata, padding: 12 }}>{feedback.text}</Text>}
     {state.isError && <View style={{ paddingHorizontal: 16 }}><Text accessibilityRole="alert" style={{ color: c.danger }}>{feed.error} {feed.items.length ? 'Showing previously loaded content.' : ''}</Text>{button('Retry', () => void load())}</View>}
-    <FlatList data={feed.items} keyExtractor={item => item.id} renderItem={({ item }) => item.origin === 'context' ? renderItem({ item: { post: item.context, reply: !!item.context.replyToId } }) : <ContextStreamEntry item={item} conversationId={conversationId} sharedScope={sharedScope} onChange={() => void load()} onTagPress={tag => feed.chooseSearch(tag.replace(/^#/, ''))} />}
+    <FlatList data={feed.items} keyExtractor={item => item.id} renderItem={({ item }) => item.origin === 'context' ? renderItem({ item: { post: item.context, reply: !!item.context.replyToId } }) : <ContextStreamEntry item={item} conversationId={conversationId} sharedScope={sharedScope} announcementReadOnly={announcementReadOnly} onChange={() => void load()} onTagPress={tag => feed.chooseSearch(tag.replace(/^#/, ''))} />}
       contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
       refreshing={state.isLoading} onRefresh={() => void load()}
       onEndReached={() => { if (!state.isError) void load(true); }} onEndReachedThreshold={0.5}

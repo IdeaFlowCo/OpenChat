@@ -301,7 +301,7 @@ export function setupChatSocket(io: Server): void {
           if (await authorizeSocketMessageSend(tx,userId,conversationId) !== 'announcement') throw new Error('Conversation no longer available');
           await assertCommunityPosting(tx,userId,conversationId);
           return persist(tx);
-        }) : await persist(session);
+        },[userId]) : await persist(session);
 
         const message = convertToJS(result.records[0].get('message'));
         const participantIds = result.records[0].get('participantIds') as string[];

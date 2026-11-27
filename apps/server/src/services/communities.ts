@@ -11,7 +11,7 @@ export class CommunityError extends Error {
 }
 type Tx = Pick<ManagedTransaction, 'run'>;
 type Role = 'owner' | 'admin' | 'member';
-type Community = { id: string; name: string; description: string; announcementsId: string; role: Role; memberCount: number };
+type Community = { id: string; name: string; description: string; announcementsId: string; role: Role; memberCount: number; state:'active'|'archived' };
 const hash = (token: string) => createHash('sha256').update(token).digest('hex');
 const integer = (n: unknown) => Number(n ?? 0);
 const effects = new WeakMap<object, Array<() => void>>();
@@ -44,27 +44,28 @@ async function summary(tx: Tx, userId: string, communityId: string): Promise<Com
   const result = await tx.run(`MATCH (:User {id:$userId})-[mine:IN_OPENCHAT_COMMUNITY]->(co:OpenChatCommunity {id:$communityId})
     OPTIONAL MATCH (:User)-[member:IN_OPENCHAT_COMMUNITY]->(co)
     RETURN co.id AS id,co.name AS name,co.description AS description,co.announcementsId AS announcementsId,
-      mine.role AS role,count(member) AS memberCount`, { userId, communityId });
+      mine.role AS role,coalesce(co.state,'active') AS state,count(member) AS memberCount`, { userId, communityId });
   const row = result.records[0];
   if (!row) throw new CommunityError(404, 'Community not found');
   return { id: row.get('id'), name: row.get('name'), description: row.get('description') ?? '',
-    announcementsId: row.get('announcementsId'), role: row.get('role'), memberCount: integer(row.get('memberCount')) };
+    announcementsId: row.get('announcementsId'), role: row.get('role'),state:row.get('state'), memberCount: integer(row.get('memberCount')) };
 }
 function admin(role: Role): void {
   if (role !== 'owner' && role !== 'admin') throw new CommunityError(403, 'Only community admins can do this');
 }
+function activeCommunity(co:Community){if(co.state==='archived')throw new CommunityError(409,'This community is archived. Existing groups keep their own memberships.');}
 
 /** Every community membership/role mutation locks its announcement conversation.
  * Message writers lock that same conversation, so demotion/leave and posting have
  * one ordering. Child membership never follows automatically from this relation.
- * Lock order: community, announcement conversation, optional child conversation.
- * Ordinary chat paths only lock their conversation and never lock a community.
+ * Lock order: sorted acting/target users, community, announcement conversation,
+ * optional child conversation. Ordinary chat paths never lock a community.
  */
-async function locked<T>(communityId: string, action: (tx: ManagedTransaction, announcementsId: string) => Promise<T>, joiningUserId?: string): Promise<T> {
+async function locked<T>(communityId: string, action: (tx: ManagedTransaction, announcementsId: string) => Promise<T>, userIds: string|string[]=[]): Promise<T> {
   return committed(async tx => {
       // A person joining multiple communities concurrently shares the same
       // capacity lock as creation. User -> community -> conversations.
-      if (joiningUserId) await acquireContextAclLocks(tx, {userIds:[joiningUserId]});
+      await acquireContextAclLocks(tx, {userIds:typeof userIds==='string'?[userIds]:userIds});
       const co = await tx.run(`MATCH (co:OpenChatCommunity {id:$communityId})
         SET co.aclRevision=coalesce(co.aclRevision,0)+1 RETURN co.announcementsId AS id`, { communityId });
       if (!co.records.length) throw new CommunityError(404, 'Community not found');
@@ -108,9 +109,9 @@ export async function listCommunities(userId: string): Promise<Community[]> {
     const r = await s.run(`MATCH (:User {id:$userId})-[mine:IN_OPENCHAT_COMMUNITY]->(co:OpenChatCommunity)
       OPTIONAL MATCH (:User)-[member:IN_OPENCHAT_COMMUNITY]->(co)
       RETURN co.id AS id,co.name AS name,co.description AS description,co.announcementsId AS announcementsId,
-        mine.role AS role,count(member) AS memberCount ORDER BY toLower(co.name),co.id`, { userId });
+        mine.role AS role,coalesce(co.state,'active') AS state,count(member) AS memberCount ORDER BY toLower(co.name),co.id`, { userId });
     return r.records.map(row => ({ id: row.get('id'),name: row.get('name'),description: row.get('description') ?? '',
-      announcementsId: row.get('announcementsId'),role: row.get('role'),memberCount: integer(row.get('memberCount')) }));
+      announcementsId: row.get('announcementsId'),role: row.get('role'),state:row.get('state'),memberCount: integer(row.get('memberCount')) }));
   } finally { await s.close(); }
 }
 
@@ -122,7 +123,7 @@ export async function createCommunity(userId: string, body: Record<string, unkno
       await acquireContextAclLocks(tx, { userIds: [userId] });
       await capacity(tx,userId);
       const r = await tx.run(`MATCH (u:User {id:$userId})
-        CREATE (co:OpenChatCommunity {id:$communityId,name:$name,description:$description,announcementsId:$announcementsId,createdAt:datetime()})
+        CREATE (co:OpenChatCommunity {id:$communityId,name:$name,description:$description,announcementsId:$announcementsId,state:'active',createdAt:datetime()})
         CREATE (u)-[:IN_OPENCHAT_COMMUNITY {role:'owner',joinedAt:datetime()}]->(co)
         CREATE (a:Conversation {id:$announcementsId,type:'group',title:$name+' · Announcements',communityId:$communityId,
           communityKind:'announcements',createdAt:datetime(),updatedAt:datetime()})
@@ -147,7 +148,7 @@ export async function getCommunity(userId: string, communityId: string) {
       RETURN u.id AS id,u.name AS name,r.role AS role ORDER BY CASE r.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,u.name,u.id`, { communityId });
     return { ...co,groups: groups.records.map(r => ({ id:r.get('id'),title:r.get('title'),joined:r.get('joined') === true })),
       members: members.records.map(r => ({id:r.get('id'),name:r.get('name') ?? 'Member',role:r.get('role')})) };
-  });
+  },[userId]);
 }
 
 export async function updateCommunity(userId: string, communityId: string, body: Record<string, unknown>, io?: Server) {
@@ -158,7 +159,7 @@ export async function updateCommunity(userId: string, communityId: string, body:
       SET co.name=$name,co.description=$description,a.title=$name+' · Announcements'`, { communityId,announcementsId,name,description });
     const result = await summary(tx,userId,communityId);
     await changed(tx,io,communityId,announcementsId); return result;
-  });
+  },[userId]);
 }
 
 export async function addCommunityGroup(userId: string, communityId: string, body: Record<string, unknown>, existing: boolean, io?: Server) {
@@ -188,7 +189,7 @@ export async function addCommunityGroup(userId: string, communityId: string, bod
     await groupChanged(tx,io,conversationId);
     await changed(tx,io,communityId,announcementsId);
     return { conversationId };
-  });
+  },[userId]);
 }
 
 export async function unlinkCommunityGroup(userId: string, communityId: string, conversationId: string, io?: Server) {
@@ -197,12 +198,12 @@ export async function unlinkCommunityGroup(userId: string, communityId: string, 
     await acquireContextAclLocks(tx, { conversationId });
     await tx.run(`MATCH (:OpenChatCommunity {id:$communityId})-[r:HAS_OPENCHAT_GROUP]->(:Conversation {id:$conversationId}) DELETE r`, { communityId,conversationId });
     await changed(tx,io,communityId,announcementsId);
-  });
+  },[userId]);
 }
 
 export async function joinCommunityGroup(userId: string, communityId: string, conversationId: string, io?: Server) {
   return locked(communityId,async (tx,announcementsId) => {
-    await summary(tx,userId,communityId);
+    activeCommunity(await summary(tx,userId,communityId));
     await acquireContextAclLocks(tx, { conversationId });
     const r = await tx.run(`MATCH (co:OpenChatCommunity {id:$communityId})-[:HAS_OPENCHAT_GROUP]->(c:Conversation {id:$conversationId}), (u:User {id:$userId})
       WHERE c.unlinkedGroupId IS NULL AND c.communityKind IS NULL
@@ -214,7 +215,7 @@ export async function joinCommunityGroup(userId: string, communityId: string, co
     await changed(tx,io,communityId,announcementsId);
     afterCommit(tx,() => {io?.to(`user:${userId}`).emit('conversation:created', { conversationId });});
     return { conversationId };
-  });
+  },[userId]);
 }
 
 export async function setCommunityRole(userId: string, communityId: string, targetId: string, role: unknown, io?: Server) {
@@ -229,7 +230,7 @@ export async function setCommunityRole(userId: string, communityId: string, targ
       await tx.run(`MATCH (:User {id:$userId})-[r:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$communityId}) SET r.role='admin'`, { userId,communityId });
     }
     await changed(tx,io,communityId,announcementsId);
-  });
+  },[userId,targetId]);
 }
 
 export async function removeCommunityMember(userId: string, communityId: string, targetId: string, io?: Server) {
@@ -250,7 +251,7 @@ export async function removeCommunityMember(userId: string, communityId: string,
       io?.to(`user:${targetId}`).emit('participant:removed', { conversationId:announcementsId,userId:targetId });
     });
     await changed(tx,io,communityId,announcementsId,targetId);
-  });
+  },[userId,targetId]);
 }
 
 export async function createCommunityInvite(userId: string, communityId: string, io?: Server) {
@@ -262,7 +263,7 @@ export async function createCommunityInvite(userId: string, communityId: string,
     await tx.run(`MATCH (co:OpenChatCommunity {id:$communityId}) CREATE (co)-[:HAS_OPENCHAT_INVITE]->(:OpenChatCommunityInvite {tokenHash:$tokenHash,expiresAt:datetime()+duration('P7D')})`, { communityId,tokenHash:hash(token) });
     await changed(tx,io,communityId,announcementsId);
     return { token };
-  });
+  },[userId]);
 }
 
 export async function revokeCommunityInvites(userId: string, communityId: string, io?: Server) {
@@ -270,7 +271,7 @@ export async function revokeCommunityInvites(userId: string, communityId: string
     admin((await summary(tx,userId,communityId)).role);
     await tx.run(`MATCH (:OpenChatCommunity {id:$communityId})-[:HAS_OPENCHAT_INVITE]->(i:OpenChatCommunityInvite) SET i.revokedAt=datetime()`, { communityId });
     await changed(tx,io,communityId,announcementsId);
-  });
+  },[userId]);
 }
 
 export async function joinCommunity(userId: string, token: unknown, io?: Server) {
@@ -282,7 +283,7 @@ export async function joinCommunity(userId: string, token: unknown, io?: Server)
     const communityId = match.records[0]!.get('id') as string;
     return await locked(communityId,async (tx,announcementsId) => {
       const valid = await tx.run(`MATCH (co:OpenChatCommunity {id:$communityId})-[:HAS_OPENCHAT_INVITE]->(i:OpenChatCommunityInvite {tokenHash:$tokenHash}), (u:User {id:$userId})
-        WHERE i.revokedAt IS NULL AND i.expiresAt > datetime()
+        WHERE i.revokedAt IS NULL AND i.expiresAt > datetime() AND coalesce(co.state,'active')='active'
           AND NOT EXISTS { MATCH (other:User)-[:IN_OPENCHAT_COMMUNITY]->(co) WHERE (u)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(u) }
         RETURN EXISTS { MATCH (u)-[:IN_OPENCHAT_COMMUNITY]->(co) } AS joined`, { communityId,tokenHash,userId });
       if (!valid.records.length) throw new CommunityError(404,'Invite not available');
@@ -313,4 +314,41 @@ export async function assertCommunityPosting(tx: Tx, userId: string, conversatio
   if (r.records[0]?.get('announcements') === true && r.records[0]?.get('admin') !== true) {
     throw new CommunityError(403,'Only community admins can post announcements');
   }
+}
+
+/** Runs at the start of the existing account-deletion transaction, before
+ * message/relationship redaction. User -> all communities -> sorted announcement
+ * conversations is consistent with community and shared-Thought mutation locks.
+ * An existing admin succeeds the owner; ordinary members gain no new authority.
+ * Without an admin the community archives, its invites close, and child/history
+ * data stays in place. The account route itself remains the authorized erase.
+ */
+export async function prepareCommunityAccountDeletion(tx:ManagedTransaction,userId:string){
+  await acquireContextAclLocks(tx,{userIds:[userId]});
+  const memberships=await tx.run(`MATCH(:User {id:$userId})-[:IN_OPENCHAT_COMMUNITY]->(co:OpenChatCommunity)
+    RETURN co.id AS id ORDER BY id`,{userId});
+  const communities:Array<{id:string;announcementsId:string}>=[];
+  for(const row of memberships.records){
+    const id=row.get('id') as string;
+    const locked=await tx.run(`MATCH(co:OpenChatCommunity {id:$id}) SET co.aclRevision=coalesce(co.aclRevision,0)+1 RETURN co.announcementsId AS announcementsId`,{id});
+    if(locked.records.length)communities.push({id,announcementsId:locked.records[0]!.get('announcementsId') as string});
+  }
+  for(const announcementsId of [...new Set(communities.map(c=>c.announcementsId))].sort())await acquireContextAclLocks(tx,{conversationId:announcementsId});
+  const updates:Array<{communityId:string;announcementsId:string;memberIds:string[]}>=[];
+  for(const co of communities){
+    const role=await tx.run(`MATCH(:User {id:$userId})-[r:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$id}) RETURN r.role AS role`,{userId,id:co.id});
+    if(role.records[0]?.get('role')==='owner'){
+      await tx.run(`MATCH(:OpenChatCommunity {id:$id})-[:HAS_OPENCHAT_INVITE]->(i:OpenChatCommunityInvite) SET i.revokedAt=datetime()`,{id:co.id});
+      const successor=await tx.run(`MATCH(u:User)-[r:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$id})
+        WHERE u.id<>$userId AND r.role='admin' RETURN u.id AS id ORDER BY r.joinedAt,u.id LIMIT 1`,{id:co.id,userId});
+      if(successor.records.length){
+        const next=successor.records[0]!.get('id') as string;
+        await tx.run(`MATCH(:User {id:$next})-[r:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$id}) SET r.role='owner'
+          WITH r OPTIONAL MATCH(:User {id:$next})-[p:PARTICIPATES_IN]->(:Conversation {id:$announcementsId}) SET p.role='owner'`,{next,id:co.id,announcementsId:co.announcementsId});
+      }else await tx.run(`MATCH(co:OpenChatCommunity {id:$id}) SET co.state='archived',co.archivedAt=datetime(),co.archiveReason='owner_account_deleted'`,{id:co.id});
+    }
+    const members=await tx.run(`MATCH(u:User)-[:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:$id}) WHERE u.id<>$userId RETURN u.id AS id`,{id:co.id,userId});
+    updates.push({communityId:co.id,announcementsId:co.announcementsId,memberIds:members.records.map(r=>r.get('id') as string)});
+  }
+  return updates;
 }

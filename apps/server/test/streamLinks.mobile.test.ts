@@ -38,6 +38,7 @@ vi.mock('../../mobile/src/services/streamDisplay', () => ({
 vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: os.content } }));
 import { ContextLane } from '../../mobile/src/components/ContextLane';
 import { ThoughtCard } from '../../mobile/src/components/ThoughtCard';
+import { ContextStreamEntry } from '../../mobile/src/components/ContextStreamEntry';
 
 // A reference note of the kind an agent writes: a title, a file on the author's
 // computer on its own line (with spaces), and a web address followed by an arrow trail.
@@ -164,5 +165,18 @@ describe('Stream cards', () => {
     os.collapsed = true;
     await act(async () => { tree = create(React.createElement(ThoughtCard, { item: thought('t1', CAPTURE) })); });
     expect(links()).toEqual([]); expect(flatten(tree!.toJSON())).toContain(CAPTURE);
+  });
+});
+
+describe('announcement Stream affordances',()=>{
+  it('hides shared edits, deletion and unpin for a demoted author, but preserves private editing',async()=>{
+    const item={...entry('owned','Synthetic announcement capture'),thought:{...thought('owned','Synthetic announcement capture'),authorId:'alice',pinned:true,pinnedBy:'alice'}};
+    await act(async()=>{tree=create(React.createElement(ContextStreamEntry,{item,conversationId:'ann',announcementReadOnly:true,onChange:vi.fn(),onTagPress:vi.fn()} as any));});
+    const card=tree!.root.findByType(ThoughtCard);
+    expect(card.props.onPress).toBeUndefined();expect(card.props.onDelete).toBeUndefined();
+    expect(flatten(tree!.toJSON())).not.toContain('Unpin from chat');
+    await act(async()=>tree!.update(React.createElement(ContextStreamEntry,{item:{...item,visibility:'private',thought:{...item.thought,pinned:false}},conversationId:'ann',announcementReadOnly:true,onChange:vi.fn(),onTagPress:vi.fn()} as any)));
+    const privateCard=tree!.root.findByType(ThoughtCard);expect(privateCard.props.onPress).toBeTypeOf('function');expect(privateCard.props.onDelete).toBeTypeOf('function');
+    expect(flatten(tree!.toJSON())).not.toContain('Share & pin');
   });
 });

@@ -113,6 +113,7 @@ export interface CommunitySummary {
   role: CommunityRole;
   announcementsId: string;
   memberCount: number;
+  state?: 'active' | 'archived';
 }
 export interface CommunityDetail extends CommunitySummary {
   groups: Array<{ id: string; title: string; joined: boolean }>;
@@ -1167,8 +1168,8 @@ export const api = {
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
-  getMessageStatus: (id: string) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`),
-  setMessageStatus: (id: string, status: ThoughtStatus, visibility?: MessageStatusVisibility) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify(visibility ? {status,visibility} : {status})}),
+  getMessageStatus: (id: string) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {expireAuthOnForbidden:false}),
+  setMessageStatus: (id: string, status: ThoughtStatus, visibility?: MessageStatusVisibility) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify(visibility ? {status,visibility} : {status}),expireAuthOnForbidden:false}),
   getConversationMessageStatuses: (conversationId: string) => timedRequest<{conversationId:string;statuses:MessageStatusEntry[]}>(`/api/chat/message-status/conversation?conversationId=${encodeURIComponent(conversationId)}`),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[]; hasMore: boolean }>(`/api/chat/conversations/${conversationId}/messages`),
@@ -1556,6 +1557,7 @@ export const api = {
     }>('/api/auth/me', {
       method: 'PATCH',
       body: JSON.stringify(fields),
+      expireAuthOnForbidden: false,
     }),
 
   // ── Personal Secretary (OpenChat-3kr.3.1) ───────────────────────────────
@@ -1944,6 +1946,7 @@ export const api = {
     request<Thought>('/api/thoughts', {
       method: 'POST',
       body: JSON.stringify(body),
+      expireAuthOnForbidden: false,
     }),
 
   /** Chat-scoped thoughts, including the caller's private scoped entries. */
@@ -1987,6 +1990,7 @@ export const api = {
     request<Thought>(`/api/thoughts/${encodeURIComponent(id)}/pin`, {
       method: 'POST',
       body: JSON.stringify({ conversationId, ...(expectedText !== undefined ? { expectedText } : {}) }),
+      expireAuthOnForbidden: false,
     }),
 
   /** Unpin a thought from a conversation (owner or pinner only). */

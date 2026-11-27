@@ -161,7 +161,7 @@ function CommunityHome({ communityId, ownerId, isCurrent }: { communityId: strin
     navigation.navigate('Chat', { conversationId });
   };
   if (!data) return <Page>{error ? <><Notice error>{error}</Notice><Button label="Retry" onPress={() => { void load(); }} /></> : <ActivityIndicator color={r.accent} accessibilityLabel="Loading community" />}</Page>;
-  const admin = data.role === 'owner' || data.role === 'admin';
+  const admin = data.state !== 'archived' && (data.role === 'owner' || data.role === 'admin');
   const linked = new Set(data.groups.map(group => group.id));
   const eligible = conversations.filter(chat => chat.type === 'group' && !chat.communityKind && !chat.unlinkedGroupId && !linked.has(chat.id)
     && chat.participants?.some(person => person.user.id === ownerId && person.role === 'owner'));
@@ -169,6 +169,7 @@ function CommunityHome({ communityId, ownerId, isCurrent }: { communityId: strin
     <View style={styles.heading}><Text accessibilityRole="header" style={[type.heading, styles.grow, { color: r.text }]}>{data.name}</Text><Chip label={data.role} /></View>
     {!!data.description && <Text selectable style={[type.body, { color: r.textSecondary }]}>{data.description}</Text>}
     <Notice>{`${data.memberCount} ${data.memberCount === 1 ? 'member' : 'members'} · Groups are joined separately`}</Notice>
+    {data.state==='archived'&&<Notice>This community was archived after its owner’s account was deleted. Existing members can read announcements and keep their group memberships.</Notice>}
     {!!error && <Notice error>{error}</Notice>}
     {confirm && <Card style={styles.form} testID="community-confirmation"><Notice>{confirm.message}</Notice><View style={styles.actions}>
       <Button label={confirm.label} variant="primary" loading={busy} onPress={() => { void run(confirm.action, confirm.after); }} />
@@ -179,7 +180,7 @@ function CommunityHome({ communityId, ownerId, isCurrent }: { communityId: strin
     <Notice>Choose Join group to get access to that group’s conversation and history.</Notice>
     {data.groups.length === 0 && <Card><Notice>No groups yet. Announcements are ready above.</Notice></Card>}
     {data.groups.map(group => <Card key={group.id} padding="none"><ListRow title={group.title} subtitle={group.joined ? 'You’re a member' : 'Optional group'}
-      trailing={<Button label={group.joined ? 'Open' : 'Join group'} size="sm" disabled={busy} onPress={() => {
+      trailing={<Button label={group.joined ? 'Open' : 'Join group'} size="sm" disabled={busy||(data.state==='archived'&&!group.joined)} onPress={() => {
         if (group.joined) { void openChat(group.id); return; }
         setConfirm({ message: `Join ${group.title}? You’ll become a group member and can read its history.`, label: 'Join group',
           action: () => api.joinCommunityGroup(communityId, group.id), after: () => { void openChat(group.id); } });

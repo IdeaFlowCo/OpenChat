@@ -2,9 +2,10 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ run: vi.fn(), close: vi.fn(), emit: vi.fn(), room: vi.fn(), publish: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({ guard: vi.fn(), run: vi.fn(), close: vi.fn(), emit: vi.fn(), room: vi.fn(), publish: vi.fn(async () => undefined) }));
 vi.mock('../src/db.js', () => ({ getDriver: () => ({ session: () => ({ run: mocks.run, close: mocks.close, executeWrite: async (work: (tx: {run:typeof mocks.run})=>unknown) => work({run:mocks.run}) }) }) }));
 vi.mock('../src/services/contextAccess.js', () => ({ acquireContextAclLocks: vi.fn() }));
+vi.mock('../src/services/announcementThoughtAccess.js', () => ({assertAnnouncementThoughtMutation:mocks.guard}));
 vi.mock('../src/services/conversationEvents.js', () => ({ publishConversationEvent: mocks.publish }));
 import router, { messageStatusThoughtId } from '../src/routes/messageStatus.js';
 const app = express().use(express.json()).use('/api/chat/message-status', router);
@@ -90,4 +91,12 @@ it('lists chat statuses only for participants and filters other people’s priva
   expect(query).toContain("t.captureMethod = 'message-status'");
   expect(query).toContain('(t.userId = $userId OR (EXISTS { MATCH (t)-[:PINNED_IN]->(c) } AND EXISTS { MATCH (:User {id:t.userId})-[:PARTICIPATES_IN]->(c) }))');
   expect(query).toContain('PARTICIPATES_IN');
+});
+
+it('returns a permission refusal without writing or broadcasting when the current announcement guard rejects',async()=>{
+  const {ContextLaneError}=await import('../src/services/contextLane.js');
+  mocks.run.mockResolvedValueOnce({records:[record({conversationId:'announcement',thoughtId:'existing',shared:true})]});
+  mocks.guard.mockRejectedValueOnce(new ContextLaneError(403,'Only current community admins can share or change announcements.'));
+  const response=await request(app).put('/api/chat/message-status?messageId=m').set('Authorization',auth).send({status:'closed'});
+  expect(response.status).toBe(403);expect(mocks.run).toHaveBeenCalledTimes(1);expect(mocks.emit).not.toHaveBeenCalled();expect(mocks.publish).not.toHaveBeenCalled();
 });

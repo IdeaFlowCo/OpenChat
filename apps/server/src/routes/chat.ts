@@ -1270,7 +1270,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       await assertCommunityPosting(tx,userId,conversationId as string);
       if (!(await checkContextWriteAccess(tx,userId,conversationId as string,req.agentKeyId,req.agentScopes))) throw new InviteError('Conversation not found',404);
       return persist(tx);
-    }) : await persist(session);
+    },[userId]) : await persist(session);
 
     if (idempotentSend && result.records.length === 0) {
       res.status(409).json({ error: 'Idempotency key already used' });
@@ -2040,7 +2040,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       await assertCommunityPosting(tx,userId,toConversationId);
       if (!(await checkContextWriteAccess(tx,userId,toConversationId))) throw new InviteError('Target conversation not found',404);
       return persist(tx);
-    }) : await persist(session);
+    },[userId]) : await persist(session);
 
     const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
@@ -2237,7 +2237,8 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       WHERE m.senderId = $userId AND m.deletedAt IS NULL
-      RETURN m.conversationId AS conversationId
+      MATCH (c:Conversation {id:m.conversationId})
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2248,16 +2249,17 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    const result = await withConversationLock(conversationId,async tx => {
-      if (!(await checkContextWriteAccess(tx,userId,conversationId,req.agentKeyId,req.agentScopes))) throw new CommunityError(403,'You cannot edit this conversation');
-      await assertCommunityPosting(tx,userId,conversationId);
-      return tx.run(`
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = $content, m.editedAt = datetime($now)
       RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, content: content.trim(), now });
-    });
+    const result = check.records[0].get('communityKind') === 'announcements' ? await withConversationLock(conversationId,async tx => {
+      await assertCommunityPosting(tx,userId,conversationId);
+      if (!await checkContextWriteAccess(tx,userId,conversationId,req.agentKeyId,req.agentScopes)) throw new CommunityError(403,'You cannot edit this announcement');
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     const message = toJS(result.records[0].get('message'));
 
@@ -2286,7 +2288,8 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       WHERE m.senderId = $userId
-      RETURN m.conversationId AS conversationId
+      MATCH (c:Conversation {id:m.conversationId})
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2297,7 +2300,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    const result = await session.run(`
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = 'Message deleted',
@@ -2305,6 +2308,11 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
           m.attachments = null
       RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, now });
+    const result = check.records[0].get('communityKind') === 'announcements' ? await withConversationLock(conversationId,async tx => {
+      await assertCommunityPosting(tx,userId,conversationId);
+      if (!await checkContextWriteAccess(tx,userId,conversationId,req.agentKeyId,req.agentScopes)) throw new CommunityError(403,'You cannot change this announcement');
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     const message = toJS(result.records[0].get('message'));
 
@@ -2341,6 +2349,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
 
     res.json(message);
   } catch (error) {
+    if (error instanceof CommunityError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error deleting message:', error);
     res.status(500).json({ error: 'Failed to delete message' });
   } finally {
@@ -2465,7 +2474,7 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     return getReactionSummary(tx, messageId, userId);
 
     };
-    const reactions=announcement?await withConversationLock(conversationId,mutate):await mutate(session);
+    const reactions=announcement?await withConversationLock(conversationId,mutate,[userId]):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };
@@ -2522,7 +2531,7 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
     return getReactionSummary(tx, messageId, userId);
 
     };
-    const reactions=announcement?await withConversationLock(conversationId,mutate):await mutate(session);
+    const reactions=announcement?await withConversationLock(conversationId,mutate,[userId]):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };

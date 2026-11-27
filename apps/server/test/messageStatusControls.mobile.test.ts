@@ -50,3 +50,18 @@ it('keeps an existing private status private when the sheet reopens',async()=>{
  mocks.get.mockResolvedValueOnce({status:'open',visibility:'private'});await mount();
  expect(chip('Only me').props.selected).toBe(true);expect(screen.root.findAllByType('Text').some(t=>String(t.props.children).includes('Only you see it'))).toBe(true);
 });
+
+it('keeps announcement member captures private and blocks a stale This chat callback',async()=>{
+ await act(async()=>{screen=create(React.createElement(MessageStatusControls,{messageId:'announcement',announcementReadOnly:true}));});
+ expect(chip('Only me').props.selected).toBe(true);expect(chip('This chat').props.disabled).toBe(true);
+ await act(async()=>chip('This chat').props.onPress());expect(mocks.set).not.toHaveBeenCalled();
+ await act(async()=>button('Open').props.onPress());expect(mocks.set).toHaveBeenCalledWith('announcement','open','private');
+});
+it('blocks changes to an already shared announcement status after admin demotion',async()=>{
+ mocks.get.mockResolvedValue({status:'open',visibility:'chat'});await mount();
+ const oldSave=button('Closed').props.onPress;
+ await act(async()=>screen.update(React.createElement(MessageStatusControls,{messageId:'synthetic-message',announcementReadOnly:true})));
+ expect(button('Closed').props.disabled).toBe(true);expect(chip('Only me').props.disabled).toBe(true);
+ await act(async()=>oldSave());expect(mocks.set).not.toHaveBeenCalled();
+ await act(async()=>chip('Only me').props.onPress());expect(mocks.set).not.toHaveBeenCalled();
+});

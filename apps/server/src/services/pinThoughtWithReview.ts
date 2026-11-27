@@ -1,11 +1,11 @@
 import type { Session } from 'neo4j-driver';
-import { acquireContextAclLocks, checkContextReadAccess } from './contextAccess.js';
+import { acquireContextAclLocks, checkContextWriteAccess } from './contextAccess.js';
 import { ContextLaneError } from './contextLane.js';
 export async function pinThoughtWithReview(session: Session, userId: string, id: string, conversationId: string, now: string, expectedText?: string) {
   if (typeof expectedText !== 'string' || expectedText.length > 20000) throw new ContextLaneError(400, 'Reviewed expectedText is required and must be at most 20000 characters');
   return session.executeWrite(async tx => {
     await acquireContextAclLocks(tx, { userIds: [userId], conversationId });
-    if (!await checkContextReadAccess(tx, userId, conversationId)) throw new ContextLaneError(404, 'Thought or conversation not found (or not yours)');
+    if (!await checkContextWriteAccess(tx, userId, conversationId)) throw new ContextLaneError(403, 'Sharing is unavailable in this conversation. Only community admins can share announcements.');
     const locked = await tx.run(`MATCH (:User {id:$userId})-[:HAS_THOUGHT]->(t:Thought {id:$id})
       WHERE (t.lane IS NULL OR t.lane<>'context') AND t.deletedAt IS NULL
       SET t.pinApprovalRevision=coalesce(t.pinApprovalRevision,0)+1 RETURN t.text AS text`, { userId, id });

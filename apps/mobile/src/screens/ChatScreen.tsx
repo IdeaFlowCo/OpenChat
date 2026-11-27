@@ -2627,6 +2627,7 @@ export function ChatScreen({
         visible={actionSheetVisible}
         message={actionSheetMessage}
         isOwn={actionSheetIsOwn}
+        announcementReadOnly={announcementReadOnly}
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onCopiedReference={showToast}

@@ -1,3 +1,4 @@
+import {prepareCommunityAccountDeletion} from '../services/communities.js';
 import { publishConversationEvent } from '../services/conversationEvents.js';
 import { deleteContextWebhooksForUser } from '../services/contextWebhooks.js';
 import { deleteImportedChatsForUser, exportImportedChatsForUser } from '../services/importedChatAccount.js';
@@ -1522,7 +1523,8 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
     const now = new Date().toISOString();
 
     // Run everything in a single write transaction for atomicity.
-    await session.executeWrite(async (tx) => {
+    const communityUpdates = await session.executeWrite(async (tx) => {
+      const updates = await prepareCommunityAccountDeletion(tx,userId);
       // 1. Redact messages authored by this user.
       await tx.run(`
         MATCH (m:Message {senderId: $userId})
@@ -1625,12 +1627,17 @@ router.delete('/me', requireAuth, requireDirectSession, async (req: Request, res
         MATCH (u:User {id: $userId})
         DETACH DELETE u
       `, { userId });
+      return updates;
     });
 
     // Emit so other connected clients refresh conversations / participant lists.
     const io = req.app.get('io');
     if (io) {
       io.emit('user:deleted', { userId });
+      for (const update of communityUpdates) for (const id of update.memberIds) {
+        io.to('user:'+id).emit('community:changed',{communityId:update.communityId});
+        io.to('user:'+id).emit('conversation:updated',{conversationId:update.announcementsId});
+      }
     }
 
     securityEvent('account_delete', 'success', { req, user_id: userId });

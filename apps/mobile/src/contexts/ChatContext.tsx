@@ -1,3 +1,4 @@
+import {publishCurrentConversationSnapshot} from '../services/conversationRefresh';
 import { setAuthenticatedRequestGuard } from '../api/authenticatedRequest';
 import { contextLaneManager } from '../services/contextLane';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
@@ -668,14 +669,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const refreshConversations = useCallback(async () => {
     const session = sendSessionRef.current;
+    const store = offlineRef.current;
+    const accountId = verifiedAccountRef.current;
     const refreshRevision = ++conversationRefreshRevision.current;
-    if (!verifiedAccountRef.current || !await offlineRef.current?.isActive()) return;
+    if (!store || !accountId || store.accountId !== accountId) return;
+    const isCurrent = () => session === sendSessionRef.current && store === offlineRef.current
+      && verifiedAccountRef.current === accountId && store.accountId === accountId
+      && refreshRevision === conversationRefreshRevision.current;
     try {
-      const data = await api.getConversations();
-      if (session !== sendSessionRef.current || refreshRevision !== conversationRefreshRevision.current || !await offlineRef.current?.isActive()) return;
-      setConversations(sortConversationsByRecent(data));
-      setUnreadByConv(unreadCountsFromConversations(data));
-      setConversationsLoaded(true);
+      await publishCurrentConversationSnapshot(store,api.getConversations,isCurrent,data => {
+        setConversations(sortConversationsByRecent(data));
+        setUnreadByConv(unreadCountsFromConversations(data));
+        setConversationsLoaded(true);
+      });
     } catch (err) {
       console.warn('[ChatContext] refreshConversations failed:', err);
     }

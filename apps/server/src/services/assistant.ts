@@ -188,11 +188,14 @@ export async function persistMessage(
     const result = await s.run(
       `
       MATCH (c:Conversation {id: $conversationId})
+      MATCH (sender:User {id: $senderId})
       // Only announcement writers participate in community role/leave locking.
       // Ordinary match-card delivery keeps its existing lock order.
       FOREACH (_ IN CASE WHEN c.communityKind='announcements' THEN [1] ELSE [] END |
+        SET sender.contextAclRevision=coalesce(sender.contextAclRevision,0)+1)
+      FOREACH (_ IN CASE WHEN c.communityKind='announcements' THEN [1] ELSE [] END |
         SET c.contextAclRevision=coalesce(c.contextAclRevision,0)+1)
-      WITH c MATCH (sender:User {id: $senderId})
+      WITH c,sender
       WHERE coalesce(c.communityKind,'') <> 'announcements' OR EXISTS {
         MATCH (sender)-[:PARTICIPATES_IN]->(c)
         MATCH (sender)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin']

@@ -27,10 +27,16 @@ remain authoritative for those managed groups.
   Announcements access, while independently joined subgroup memberships stay in
   place. Leave those chats separately through their normal group controls.
 - Removing another member revokes outstanding community codes to prevent reuse.
+- Deleting the owner’s account transfers ownership only to an existing admin.
+  If no admin exists, the community becomes archived and its codes stop working.
+  Remaining members may read existing announcements and leave; child groups keep
+  their independent memberships and history.
 
 Announcement messages and shared Context contributions are admin-only in this
 first slice. Member replies are deferred; existing reactions remain available.
-Private Stream captures remain private. This feature does not claim WhatsApp's
+Private Stream captures and statuses remain available to members. Sharing or
+changing shared Stream entries, pins and statuses requires current admin rights,
+including entries that a former admin originally authored. This feature does not claim WhatsApp's
 phone-number privacy rules, end-to-end encryption, quotas, or contact import.
 
 ## API and graph contract
@@ -69,13 +75,17 @@ The two new uniqueness constraints are additive and namespaced to OpenChat.
 Existing chat messages, Unlinked groups, grants and other shared graph labels
 are not migrated or copied.
 
-Community transactions lock the community, its announcement conversation and
-then any child conversation they change. Posting and shared Context writes lock
-the conversation and recheck current authority; leave/demotion locks that same
+Community transactions lock sorted acting/target users, the community, its
+announcement conversation and then any child conversation they change. Shared
+Thought edits lock their owner and all announcement audiences in sorted order.
+Posting and shared Context writes recheck current authority under the ACL locks; leave/demotion locks that same
 announcement conversation. HTTP, socket, forwarding and internal agent message
 writers enforce the posting rule. Notifications contain only an opaque community
 ID and are emitted after commit, including after a retried transaction. Message
 fanout independently selects current participants under the existing ACL lock.
+Revocation excludes removed members from new authorized writes. Content already
+committed while they were members may already be queued or in flight to a
+notification/webhook; this feature cannot recall an earlier authorized delivery.
 
 ## Release and rollback boundary
 
