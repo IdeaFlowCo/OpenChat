@@ -26,6 +26,9 @@ export async function initDatabase(): Promise<void> {
   const session = getDriver().session();
 
   try {
+    // Additive OpenChat-only community metadata. Existing chat/history nodes stay in place.
+    await session.run(`CREATE CONSTRAINT openchat_community_id IF NOT EXISTS FOR (c:OpenChatCommunity) REQUIRE c.id IS UNIQUE`);
+    await session.run(`CREATE CONSTRAINT openchat_community_invite_hash IF NOT EXISTS FOR (i:OpenChatCommunityInvite) REQUIRE i.tokenHash IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT unlinked_group_sync_id IF NOT EXISTS FOR (s:UnlinkedGroupSync) REQUIRE s.groupId IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT vision_save_receipt_key IF NOT EXISTS FOR (s:VisionSaveReceipt) REQUIRE s.key IS UNIQUE`);
     await session.run(`CREATE CONSTRAINT vision_save_grant_owner IF NOT EXISTS FOR (g:VisionSaveGrant) REQUIRE g.userId IS UNIQUE`);

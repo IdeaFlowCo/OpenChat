@@ -89,12 +89,13 @@ export async function acceptInviteTransaction(session: Session, userId: string, 
     const lockResult = await tx.run(`
       MATCH (c:Conversation)-[:HAS_INVITE]->(inv:GroupInvite {token: $token})
       SET c.updatedAt = datetime($now)
-      RETURN c.id AS conversationId, c.unlinkedGroupId AS managedGroupId, inv
+      RETURN c.id AS conversationId, c.unlinkedGroupId AS managedGroupId, c.communityKind AS communityKind, inv
     `, { token, now });
 
     if (lockResult.records.length === 0) {
       throw new InviteError('Invite not found', 404);
     }
+    if (lockResult.records[0].get('communityKind') === 'announcements') throw new InviteError('Join through the OpenChat community',410);
     if (lockResult.records[0].get('managedGroupId')) throw new InviteError('Join through the Unlinked community', 410);
     const conversationId = lockResult.records[0].get('conversationId') as string;
     const inv = toJS(lockResult.records[0].get('inv').properties) as Record<string, unknown>;

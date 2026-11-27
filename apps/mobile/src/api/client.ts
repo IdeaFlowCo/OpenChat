@@ -105,10 +105,30 @@ export interface Participant {
   role?: 'owner' | 'member';
 }
 
+export type CommunityRole = 'owner' | 'admin' | 'member';
+export interface CommunitySummary {
+  id: string;
+  name: string;
+  description: string;
+  role: CommunityRole;
+  announcementsId: string;
+  memberCount: number;
+  state?: 'active' | 'archived';
+}
+export interface CommunityDetail extends CommunitySummary {
+  groups: Array<{ id: string; title: string; joined: boolean }>;
+  members: Array<{ id: string; name: string; role: CommunityRole }>;
+}
+
 export interface Conversation {
   id: string;
   title?: string | null;
   type: 'direct' | 'group';
+  communityKind?: 'announcements' | null;
+  communityId?: string | null;
+  unlinkedGroupId?: string | null;
+  /** Authoritative caller-specific announcement posting permission. */
+  canPost?: boolean;
   participants?: Participant[];
   /** Caller-specific unread total returned by GET /api/chat/conversations. */
   unreadCount?: number;
@@ -1132,11 +1152,24 @@ export const api = {
     { status: 'unclaimed'; name: string } | { status: 'unavailable' }
   >('/api/unlinked/recipient', { method: 'POST', body: JSON.stringify({ profile }) }),
   getMe: () => timedRequest<User>('/api/auth/me'),
+  listCommunities: () => request<CommunitySummary[]>('/api/communities', { expireAuthOnForbidden: false }),
+  getCommunity: (id: string) => request<CommunityDetail>(`/api/communities/${encodeURIComponent(id)}`, { expireAuthOnForbidden: false }),
+  createCommunity: (name: string, description: string) => request<CommunitySummary>('/api/communities', { method: 'POST', body: JSON.stringify({ name, description }), expireAuthOnForbidden: false }),
+  updateCommunity: (id: string, name: string, description: string) => request<CommunitySummary>(`/api/communities/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name, description }), expireAuthOnForbidden: false }),
+  joinCommunity: (token: string) => request<CommunitySummary>('/api/communities/join', { method: 'POST', body: JSON.stringify({ token }), expireAuthOnForbidden: false }),
+  createCommunityGroup: (id: string, title: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups`, { method: 'POST', body: JSON.stringify({ title }), expireAuthOnForbidden: false }),
+  linkCommunityGroup: (id: string, conversationId: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups/link`, { method: 'POST', body: JSON.stringify({ conversationId, allowCommunityJoin: true }), expireAuthOnForbidden: false }),
+  unlinkCommunityGroup: (id: string, conversationId: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(conversationId)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+  joinCommunityGroup: (id: string, conversationId: string) => request<{ conversationId: string }>(`/api/communities/${encodeURIComponent(id)}/groups/${encodeURIComponent(conversationId)}/join`, { method: 'POST', expireAuthOnForbidden: false }),
+  setCommunityMemberRole: (id: string, userId: string, role: CommunityRole) => request<void>(`/api/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ role }), expireAuthOnForbidden: false }),
+  removeCommunityMember: (id: string, userId: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+  createCommunityInvite: (id: string) => request<{ token: string }>(`/api/communities/${encodeURIComponent(id)}/invites`, { method: 'POST', expireAuthOnForbidden: false }),
+  revokeCommunityInvites: (id: string) => request<void>(`/api/communities/${encodeURIComponent(id)}/invites`, { method: 'DELETE', expireAuthOnForbidden: false }),
   getConversations: () => request<Conversation[]>('/api/chat/conversations'),
   getConversation: (conversationId: string) =>
     request<Conversation>(`/api/chat/conversations/${conversationId}`),
-  getMessageStatus: (id: string) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`),
-  setMessageStatus: (id: string, status: ThoughtStatus, visibility?: MessageStatusVisibility) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify(visibility ? {status,visibility} : {status})}),
+  getMessageStatus: (id: string) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {expireAuthOnForbidden:false}),
+  setMessageStatus: (id: string, status: ThoughtStatus, visibility?: MessageStatusVisibility) => timedRequest<MessageStatusValue>(`/api/chat/message-status?messageId=${encodeURIComponent(id)}`, {method:'PUT',body:JSON.stringify(visibility ? {status,visibility} : {status}),expireAuthOnForbidden:false}),
   getConversationMessageStatuses: (conversationId: string) => timedRequest<{conversationId:string;statuses:MessageStatusEntry[]}>(`/api/chat/message-status/conversation?conversationId=${encodeURIComponent(conversationId)}`),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[]; hasMore: boolean }>(`/api/chat/conversations/${conversationId}/messages`),
@@ -1431,6 +1464,7 @@ export const api = {
     request<Message>(`/api/chat/messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ content }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -1438,7 +1472,7 @@ export const api = {
    * DELETE /api/chat/messages/:id
    */
   deleteMessage: (messageId: string) =>
-    request<Message>(`/api/chat/messages/${messageId}`, { method: 'DELETE' }),
+    request<Message>(`/api/chat/messages/${messageId}`, { method: 'DELETE', expireAuthOnForbidden: false }),
 
   // ── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
 
@@ -1450,6 +1484,7 @@ export const api = {
     request<{ reactions: ReactionSummary[] }>(`/api/chat/messages/${messageId}/reactions`, {
       method: 'POST',
       body: JSON.stringify({ emoji }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -1459,7 +1494,7 @@ export const api = {
   removeReaction: (messageId: string, emoji: string) =>
     request<{ reactions: ReactionSummary[] }>(
       `/api/chat/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', expireAuthOnForbidden: false }
     ),
 
   // ── Read receipts (OpenChat-0nj) ────────────────────────────────────────
@@ -1842,6 +1877,7 @@ export const api = {
     request<Message>(`/api/chat/messages/${messageId}/forward`, {
       method: 'POST',
       body: JSON.stringify({ toConversationId }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -1912,6 +1948,7 @@ export const api = {
     request<Thought>('/api/thoughts', {
       method: 'POST',
       body: JSON.stringify(body),
+      expireAuthOnForbidden: false,
     }),
 
   /** Chat-scoped thoughts, including the caller's private scoped entries. */
@@ -1955,6 +1992,7 @@ export const api = {
     request<Thought>(`/api/thoughts/${encodeURIComponent(id)}/pin`, {
       method: 'POST',
       body: JSON.stringify({ conversationId, ...(expectedText !== undefined ? { expectedText } : {}) }),
+      expireAuthOnForbidden: false,
     }),
 
   /** Unpin a thought from a conversation (owner or pinner only). */
@@ -1980,6 +2018,7 @@ export const api = {
     request<Thought>(`/api/thoughts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(fields),
+      expireAuthOnForbidden: false,
     }),
 
   /** Delete a thought (204 response → returns void). */

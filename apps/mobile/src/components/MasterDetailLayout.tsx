@@ -1,3 +1,4 @@
+import { CommunitiesLink } from './CommunitiesLink';
 import { isUnlinkedEmbed } from '../services/unlinkedEmbed';
 /**
  * MasterDetailLayout — the side-by-side desktop view of OpenChat.
@@ -240,8 +241,12 @@ export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
   const openAgentOverlay = useCallback(() => setAgentPanelOpen(true), []);
   const openShortcuts = useCallback(() => navigation.navigate('KeyboardShortcuts'), [navigation]);
   const openGroupSettings = useCallback(
-    (cid: string) => navigation.navigate('GroupSettings', { conversationId: cid }),
-    [navigation]
+    (cid: string) => {
+      const chat = conversations.find(item => item.id === cid);
+      if (chat?.communityKind === 'announcements' && chat.communityId) navigation.navigate('Community', { communityId: chat.communityId });
+      else navigation.navigate('GroupSettings', { conversationId: cid });
+    },
+    [navigation, conversations]
   );
 
   // Only the focused layout contributes local menu/selection behavior to
@@ -456,6 +461,7 @@ export function MasterDetailLayout({ detail }: { detail?: ReactNode } = {}) {
         <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Friends', { section: 'friends' })} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: collapsed ? 4 : 16 }}>
           <Text style={{ color: c.primary, fontWeight: '600', textAlign: collapsed ? 'center' : 'left', fontSize: 13 }}>People</Text>
         </Pressable>
+        <CommunitiesLink compact={collapsed} />
         <View style={{ flex: 1 }}>
           <ConversationList
             activeId={activeConversationId}

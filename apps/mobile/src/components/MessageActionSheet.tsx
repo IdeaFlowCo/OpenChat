@@ -50,6 +50,7 @@ interface Props {
   visible: boolean;
   message: Message | null;
   isOwn: boolean;
+  announcementReadOnly?: boolean;
   senderName: string;
   onDismiss: () => void;
   onCopiedReference?: (message: string) => void;
@@ -105,6 +106,7 @@ export function MessageActionSheet({
   visible,
   message,
   isOwn,
+  announcementReadOnly=false,
   senderName,
   onDismiss,
   onCopiedReference,
@@ -347,7 +349,7 @@ export function MessageActionSheet({
     return <Modal transparent animationType="fade" visible={visible} onRequestClose={handleDismiss}>
       <Pressable style={overlayStyle} onPress={handleDismiss}><Pressable onPress={() => undefined}>
         <View style={sheetStyle}>
-          <MessageStatusControls key={message.id} messageId={message.id} onSaved={onStatusSaved} />
+          <MessageStatusControls key={message.id} messageId={message.id} announcementReadOnly={announcementReadOnly} onSaved={onStatusSaved} />
           <TouchableOpacity accessibilityRole="button" style={[styles.cancelRow, { borderColor: c.border }]} onPress={handleDismiss}><Text style={[styles.cancelLabel, { color: c.textSecondary }]}>Done</Text></TouchableOpacity>
         </View>
       </Pressable></Pressable>
@@ -557,7 +559,7 @@ export function MessageActionSheet({
             )}
 
             {/* Reply — always shown (skip if message is deleted) */}
-            {!message.deletedAt && (
+            {!announcementReadOnly&&!message.deletedAt && (
               <TouchableOpacity
                 style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={handleReply}
@@ -610,7 +612,7 @@ export function MessageActionSheet({
                 <Text style={[styles.actionLabel, { color: c.textPrimary }]}>Save to Stream</Text>
               </TouchableOpacity>
             )}
-            {!message.deletedAt && !!message.content?.trim() && (
+            {!announcementReadOnly&&!message.deletedAt && !!message.content?.trim() && (
               <TouchableOpacity
                 style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={handleSaveAndPin}
@@ -670,7 +672,7 @@ export function MessageActionSheet({
             )}
 
             {/* Edit — own non-deleted messages only (OpenChat-q9h) */}
-            {isOwn && !message.deletedAt && (
+            {!announcementReadOnly&&isOwn && !message.deletedAt && (
               <TouchableOpacity
                 style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={handleEditPress}
@@ -682,7 +684,7 @@ export function MessageActionSheet({
             )}
 
             {/* Delete — own messages only (OpenChat-q9h) */}
-            {isOwn && !message.deletedAt && (
+            {!announcementReadOnly&&isOwn && !message.deletedAt && (
               <TouchableOpacity
                 style={[styles.actionRow, styles.actionRowBorder, { borderColor: c.divider }]}
                 onPress={handleDeletePress}

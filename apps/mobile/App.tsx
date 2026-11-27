@@ -78,6 +78,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { ChatScreenRouter } from './src/screens/ChatScreenRouter';
 import { KeyboardShortcutsScreen } from './src/screens/KeyboardShortcutsScreen';
 import { PermissionsScreen } from './src/screens/PermissionsScreen';
+import { CommunitiesScreen, CommunityScreen } from './src/screens/CommunitiesScreen';
 import { SecretaryScreen } from './src/screens/SecretaryScreen';
 import { NewConversationScreen } from './src/screens/NewConversationScreen';
 import { InvitePersonScreen } from './src/screens/InvitePersonScreen';
@@ -162,6 +163,8 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
         component={ChatScreenRouter}
         options={{ title: '' /* set dynamically in screen */ }}
       />
+      <ChatsStack.Screen name="Communities" component={CommunitiesScreen} options={{ title: 'Communities' }} />
+      <ChatsStack.Screen name="Community" component={CommunityScreen} options={{ title: 'Community' }} />
       <ChatsStack.Screen name="Compose" component={ComposeScreen} getId={({ params }) => params.requestRevision} options={{ title: isUnlinkedEmbed() ? 'New message' : 'Message with OpenChat' }} />
       <ChatsStack.Screen name="OriginalMessage" component={OriginalMessageScreen} options={{ title: 'Message' }} />
       <ChatsStack.Screen

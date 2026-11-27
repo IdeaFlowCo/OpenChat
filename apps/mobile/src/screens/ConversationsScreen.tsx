@@ -288,6 +288,7 @@ export function ConversationsScreen() {
               style={[styles.peopleRow, { borderBottomColor: c.divider }]}
             />
           )}
+          {!isUnlinkedEmbed() && <ListRow icon="people" title="Communities" onPress={() => navigation.navigate('Communities')} style={[styles.peopleRow, { borderBottomColor: c.divider }]} />}
           {!isUnlinkedEmbed() && <ImportedChatsLink />}
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}

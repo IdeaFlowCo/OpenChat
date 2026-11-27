@@ -1,3 +1,5 @@
+import { assertCommunityPosting, CommunityError } from '../services/communities.js';
+import { checkContextReadAccess, checkContextWriteAccess } from '../services/contextAccess.js';
 import messageContextRoutes from './messageContext.js';
 import messageStatusRoutes from './messageStatus.js';
 import { peopleSuggestions } from '../services/peopleSuggestions.js';
@@ -416,8 +418,9 @@ router.patch('/conversations/:id/participants/me', requireAuth, async (req: Requ
 
 async function assertConversationMutation(tx: ManagedTransaction, id: string, userId: string, ownerOnly: boolean, allowManaged = false): Promise<void> {
   const result = await tx.run(`MATCH(:User {id:$userId})-[p:PARTICIPATES_IN]->(c:Conversation {id:$id})
-    RETURN c.unlinkedGroupId AS managedGroupId,p.role AS role`, { id,userId });
+    RETURN c.unlinkedGroupId AS managedGroupId,c.communityKind AS communityKind,p.role AS role`, { id,userId });
   if (!result.records.length) throw new InviteError('Conversation not found',404);
+  if (result.records[0].get('communityKind') === 'announcements') throw new InviteError('Manage announcements through the community',409);
   if (!allowManaged && result.records[0].get('managedGroupId')) throw new InviteError('Manage membership in the Unlinked group',409);
   if (ownerOnly && result.records[0].get('role') !== 'owner') throw new InviteError('Only the group owner can make this change',403);
 }
@@ -696,7 +699,7 @@ router.get('/conversations/:id', resolveActor, async (req: Request, res: Respons
     const result = await session.run(`
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $id})
       MATCH (participant:User)-[rel:PARTICIPATES_IN]->(c)
-      RETURN c, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN participant.profileStatusText IS NOT NULL OR participant.profileStatusEmoji IS NOT NULL THEN { text: participant.profileStatusText, emoji: participant.profileStatusEmoji, updatedAt: participant.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
+      RETURN c, CASE WHEN c.communityKind = 'announcements' THEN EXISTS { MATCH (u)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] } ELSE true END AS canPost, collect({user: participant {.id, .name, .avatarUrl, .presenceStatus, .statusMessage, profileStatus: CASE WHEN participant.profileStatusText IS NOT NULL OR participant.profileStatusEmoji IS NOT NULL THEN { text: participant.profileStatusText, emoji: participant.profileStatusEmoji, updatedAt: participant.profileStatusUpdatedAt } ELSE null END, .lastSeenAt, .isBot, ${legacyEmailProjection('participant')}}, role: rel.role}) AS participants
     `, { userId, id });
 
     if (result.records.length === 0) {
@@ -706,7 +709,7 @@ router.get('/conversations/:id', resolveActor, async (req: Request, res: Respons
 
     const conv = toJS(result.records[0].get('c').properties) as Record<string, unknown>;
     const participants = toJS(result.records[0].get('participants'));
-    res.json({ ...conv, participants });
+    res.json({ ...conv, participants, canPost: result.records[0].get('canPost') !== false });
   } catch (error) {
     console.error('Error fetching conversation:', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
@@ -884,7 +887,12 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
         LIMIT $limit
       `;
 
-    const result = await session.run(query, { id, limit: neo4j.int(limit), before, userId });
+    const params = { id, limit: neo4j.int(limit), before, userId };
+    const result = check.records[0].get('c')?.properties?.communityKind === 'announcements'
+      ? await withConversationLock(id as string,async tx => {
+        if (!(await checkContextReadAccess(tx,userId,id as string,req.agentKeyId,req.agentScopes))) throw new InviteError('Conversation not found',404);
+        return tx.run(query,params);
+      }) : await session.run(query,params);
     const messages = result.records.map(r => {
       const msg = toJS(r.get('message')) as Record<string, unknown>;
       if (msg && typeof msg.attachments === 'string') {
@@ -911,6 +919,7 @@ router.get('/conversations/:id/messages', resolveActor, async (req: Request, res
     const hasMore = result.records.length === limit;
     res.json({ messages, hasMore });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
   } finally {
@@ -1182,7 +1191,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       ? await resolveMentionedUserIds(session, conversationId as string, userId, messageContent)
       : [];
 
-    const result = await session.run(`
+    const announcement = check.records[0].get('c')?.properties?.communityKind === 'announcements';
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
       MERGE (m:Message {id: $id})
@@ -1256,6 +1266,11 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       emojiSize: hasAttachments ? null : emojiSize.size,
       preview,
     });
+    const result = announcement ? await withConversationLock(conversationId as string,async tx => {
+      await assertCommunityPosting(tx,userId,conversationId as string);
+      if (!(await checkContextWriteAccess(tx,userId,conversationId as string,req.agentKeyId,req.agentScopes))) throw new InviteError('Conversation not found',404);
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     if (idempotentSend && result.records.length === 0) {
       res.status(409).json({ error: 'Idempotency key already used' });
@@ -1381,6 +1396,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
 
     res.status(201).json(message);
   } catch (error) {
+    if (error instanceof CommunityError || error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });
   } finally {
@@ -1983,7 +1999,8 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
     const preview = content || (attachmentsJson ? attachmentsPreview(forwardedAttachments) : '');
 
     // 5. Create the new message in the target conversation.
-    const result = await session.run(`
+    const announcement = targetCheck.records[0].get('c')?.properties?.communityKind === 'announcements';
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (c:Conversation {id: $toConversationId})
       MATCH (forwarder:User {id: $userId})
       CREATE (m:Message {
@@ -2019,6 +2036,11 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
       forwardedFromSenderName,
       preview,
     });
+    const result = announcement ? await withConversationLock(toConversationId,async tx => {
+      await assertCommunityPosting(tx,userId,toConversationId);
+      if (!(await checkContextWriteAccess(tx,userId,toConversationId))) throw new InviteError('Target conversation not found',404);
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     const raw = toJS(result.records[0].get('message')) as Record<string, unknown>;
     const participantIds = result.records[0].get('participantIds') as string[];
@@ -2036,6 +2058,7 @@ router.post('/messages/:id/forward', requireAuth, async (req: Request, res: Resp
 
     res.status(201).json(raw);
   } catch (error) {
+    if (error instanceof CommunityError || error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error forwarding message:', error);
     res.status(500).json({ error: 'Failed to forward message' });
   } finally {
@@ -2214,7 +2237,8 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       WHERE m.senderId = $userId AND m.deletedAt IS NULL
-      RETURN m.conversationId AS conversationId
+      MATCH (c:Conversation {id:m.conversationId})
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2225,12 +2249,17 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    const result = await session.run(`
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = $content, m.editedAt = datetime($now)
       RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, content: content.trim(), now });
+    const result = check.records[0].get('communityKind') === 'announcements' ? await withConversationLock(conversationId,async tx => {
+      await assertCommunityPosting(tx,userId,conversationId);
+      if (!await checkContextWriteAccess(tx,userId,conversationId,req.agentKeyId,req.agentScopes)) throw new CommunityError(403,'You cannot edit this announcement');
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     const message = toJS(result.records[0].get('message'));
 
@@ -2240,6 +2269,7 @@ router.patch('/messages/:id', resolveActor, async (req: Request, res: Response) 
 
     res.json(message);
   } catch (error) {
+    if (error instanceof CommunityError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error editing message:', error);
     res.status(500).json({ error: 'Failed to edit message' });
   } finally {
@@ -2258,7 +2288,8 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       WHERE m.senderId = $userId
-      RETURN m.conversationId AS conversationId
+      MATCH (c:Conversation {id:m.conversationId})
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2269,7 +2300,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
-    const result = await session.run(`
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (sender:User {id: m.senderId})
       SET m.content = 'Message deleted',
@@ -2277,6 +2308,11 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
           m.attachments = null
       RETURN m { .*, sender: sender { .id, .name, .avatarUrl, ${legacyEmailProjection('sender')} } } AS message
     `, { messageId, now });
+    const result = check.records[0].get('communityKind') === 'announcements' ? await withConversationLock(conversationId,async tx => {
+      await assertCommunityPosting(tx,userId,conversationId);
+      if (!await checkContextWriteAccess(tx,userId,conversationId,req.agentKeyId,req.agentScopes)) throw new CommunityError(403,'You cannot change this announcement');
+      return persist(tx);
+    },[userId]) : await persist(session);
 
     const message = toJS(result.records[0].get('message'));
 
@@ -2313,6 +2349,7 @@ router.delete('/messages/:id', resolveActor, async (req: Request, res: Response)
 
     res.json(message);
   } catch (error) {
+    if (error instanceof CommunityError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error deleting message:', error);
     res.status(500).json({ error: 'Failed to delete message' });
   } finally {
@@ -2333,7 +2370,7 @@ const ALLOWED_KINDS = ['filed'];
 // separately from plain reactions with the same emoji so clients can render
 // them distinctly (e.g. a tappable filed badge).
 async function getReactionSummary(
-  session: ReturnType<ReturnType<typeof getDriver>['session']>,
+  session: Pick<ManagedTransaction,'run'>,
   messageId: string,
   userId: string
 ): Promise<Array<{ emoji: string; count: number; byMe: boolean; kind?: string; href?: string }>> {
@@ -2401,7 +2438,7 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
-      RETURN m.conversationId AS conversationId
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2412,15 +2449,18 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
     const conversationId = check.records[0].get('conversationId') as string;
     const now = new Date().toISOString();
 
+    const announcement=check.records[0].get('communityKind') === 'announcements';
+    const mutate=async (tx: Pick<ManagedTransaction,'run'>) => {
+      if (announcement && !(await checkContextReadAccess(tx,userId,conversationId))) throw new InviteError('Message not found or not accessible',404);
     if (isKindReaction) {
-      await session.run(`
+      await tx.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
         MERGE (u)-[r:REACTED {emoji: $emoji, kind: $kind}]->(m)
         ON CREATE SET r.createdAt = datetime($now)
         SET r.href = $href
       `, { userId, messageId, emoji, now, kind, href: href ?? null });
     } else {
-      await session.run(`
+      await tx.run(`
         MATCH (u:User {id: $userId}), (m:Message {id: $messageId})
         OPTIONAL MATCH (u)-[existing:REACTED {emoji: $emoji}]->(m)
         WHERE existing.kind IS NULL
@@ -2431,7 +2471,10 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
       `, { userId, messageId, emoji, now });
     }
 
-    const reactions = await getReactionSummary(session, messageId, userId);
+    return getReactionSummary(tx, messageId, userId);
+
+    };
+    const reactions=announcement?await withConversationLock(conversationId,mutate,[userId]):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };
@@ -2439,6 +2482,7 @@ router.post('/messages/:id/reactions', resolveActor, async (req: Request, res: R
 
     res.status(201).json({ reactions });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error adding reaction:', error);
     res.status(500).json({ error: 'Failed to add reaction' });
   } finally {
@@ -2463,7 +2507,7 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
     const check = await session.run(`
       MATCH (m:Message {id: $messageId})
       MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: m.conversationId})
-      RETURN m.conversationId AS conversationId
+      RETURN m.conversationId AS conversationId,c.communityKind AS communityKind
     `, { messageId, userId });
 
     if (check.records.length === 0) {
@@ -2473,15 +2517,21 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 
     const conversationId = check.records[0].get('conversationId') as string;
 
+    const announcement=check.records[0].get('communityKind') === 'announcements';
+    const mutate=async (tx: Pick<ManagedTransaction,'run'>) => {
+      if (announcement && !(await checkContextReadAccess(tx,userId,conversationId))) throw new InviteError('Message not found or not accessible',404);
     // Match on kind too: null kind removes only the plain reaction; a supplied
     // kind removes that specific kind edge, leaving any plain reaction intact.
-    await session.run(`
+    await tx.run(`
       MATCH (u:User {id: $userId})-[r:REACTED {emoji: $emoji}]->(m:Message {id: $messageId})
       WHERE r.kind = $kind OR (r.kind IS NULL AND $kind IS NULL)
       DELETE r
     `, { userId, messageId, emoji, kind });
 
-    const reactions = await getReactionSummary(session, messageId, userId);
+    return getReactionSummary(tx, messageId, userId);
+
+    };
+    const reactions=announcement?await withConversationLock(conversationId,mutate,[userId]):await mutate(session);
 
     const io = req.app.get('io') as IOServer | undefined;
     const payload = { messageId, conversationId, reactions };
@@ -2489,6 +2539,7 @@ router.delete('/messages/:id/reactions/:emoji', resolveActor, async (req: Reques
 
     res.json({ reactions });
   } catch (error) {
+    if (error instanceof InviteError) { res.status(error.status).json({error:error.message}); return; }
     console.error('Error removing reaction:', error);
     res.status(500).json({ error: 'Failed to remove reaction' });
   } finally {

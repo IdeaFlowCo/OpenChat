@@ -558,7 +558,8 @@ export function ChatScreen({
   } = useRecording();
   const isAnyRecording = recordingStatus === 'recording';
   const isRecording = isAnyRecording && recordingConversationId === conversationId;
-  const composerBusy = sending || finishingRecording;
+  const announcementReadOnly = conversation?.communityKind === 'announcements' && conversation.canPost !== true;
+  const composerBusy = sending || finishingRecording || announcementReadOnly;
 
   // ── Toast state ────────────────────────────────────────────────────────────
   const [toastVisible, setToastVisible] = useState(false);
@@ -781,10 +782,11 @@ export function ChatScreen({
   }), [conversation?.participants?.length, containsBot, directPresenceText, isGroup, isMuted, isSelfDM]);
 
   const openConversationInfo = useCallback(() => {
-    if (isGroup) navigation.navigate('GroupSettings', { conversationId });
+    if (conversation?.communityKind === 'announcements' && conversation.communityId) navigation.navigate('Community', { communityId: conversation.communityId });
+    else if (isGroup) navigation.navigate('GroupSettings', { conversationId });
     else if (isSelfDM) navigation.navigate('ProfileEdit');
     else if (other?.id) navigation.navigate('ContactProfile', { userId: other.id });
-  }, [conversationId, isGroup, isSelfDM, navigation, other?.id]);
+  }, [conversationId, conversation?.communityKind, conversation?.communityId, isGroup, isSelfDM, navigation, other?.id]);
 
   const openConversationThoughts = useCallback(() => {
     setConversationMenuVisible(false);
@@ -2450,7 +2452,9 @@ export function ChatScreen({
       )}
       {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
 
-      <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {announcementReadOnly ? <View testID="announcements-read-only" style={{ padding: space[4], backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
+        <Text style={[type.body, { color: c.textMetadata }]}>Only community admins can post announcements.</Text>
+      </View> : <View style={[styles.composer, { backgroundColor: c.surface, borderColor: c.border }]}>
         {/* Hide-keyboard button: a visible way out while typing, beyond the
             swipe-down-on-the-list gesture. Native only; web has no
             on-screen keyboard to dismiss. */}
@@ -2594,7 +2598,7 @@ export function ChatScreen({
             )}
           </TouchableOpacity>
         )}
-      </View>
+      </View>}
       {/* Home-indicator strip under the composer in a phone thread (see
           composerBottomInset); the keyboard covers it while open. */}
       {composerBottomInset > 0 && (
@@ -2623,6 +2627,7 @@ export function ChatScreen({
         visible={actionSheetVisible}
         message={actionSheetMessage}
         isOwn={actionSheetIsOwn}
+        announcementReadOnly={announcementReadOnly}
         senderName={actionSheetSenderName}
         onDismiss={() => setActionSheetVisible(false)}
         onCopiedReference={showToast}

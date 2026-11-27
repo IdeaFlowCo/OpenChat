@@ -26,6 +26,8 @@ import { BotBadge } from '../components/BotBadge';
 import { isPlaceholderEmail } from '../utils/email';
 import type { NavProp, RouteProps } from '../navigation/types';
 import { onlinePresence } from '../utils/listTime';
+import { Button, Card } from '../components/ui';
+import { space, type } from '../theme/tokens';
 
 export function GroupSettingsScreen() {
   const navigation = useNavigation<NavProp<'GroupSettings'>>();
@@ -84,6 +86,14 @@ export function GroupSettingsScreen() {
       </View>
     );
   }
+
+  if (conversation.communityKind === 'announcements' && conversation.communityId) return (
+    <View style={[styles.root, { backgroundColor: c.background, padding: space[4] }]}>
+      <Card><Text style={[type.body, { color: c.textMetadata, marginBottom: space[3] }]}>Announcements membership and posting permissions are managed by the community.</Text>
+        <Button label="Manage community" onPress={() => navigation.navigate('Community', { communityId: conversation.communityId! })} />
+      </Card>
+    </View>
+  );
 
   const saveTitle = async () => {
     if (!isOwner) return;

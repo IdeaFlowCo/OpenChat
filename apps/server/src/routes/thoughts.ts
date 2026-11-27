@@ -1,3 +1,6 @@
+import type {ManagedTransaction} from 'neo4j-driver';
+import {acquireContextAclLocks,checkContextWriteAccess} from '../services/contextAccess.js';
+import {assertAnnouncementThoughtMutation,assertAnnouncementTargetWrite} from '../services/announcementThoughtAccess.js';
 import { publishConversationEvent } from '../services/conversationEvents.js';
 import { pinThoughtWithReview } from '../services/pinThoughtWithReview.js';
 import { ContextLaneError } from '../services/contextLane.js';
@@ -520,7 +523,10 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
 
   const session = getDriver().session();
   try {
-    const result = await session.run(
+    const result = await session.executeWrite(async tx => {
+      await acquireContextAclLocks(tx,{userIds:[userId],conversationId:String(conversationId)});
+      await assertAnnouncementTargetWrite(tx,userId,String(conversationId));
+      return tx.run(
       `
       MATCH (t:Thought {id: $id})-[p:PINNED_IN]->(c:Conversation {id: $conversationId})
       WHERE (t.userId = $userId OR p.pinnedBy = $userId) AND (t.lane IS NULL OR t.lane <> 'context')
@@ -529,6 +535,7 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
       `,
       { userId, id, conversationId }
     );
+    });
 
     const removed = toJS(result.records[0]?.get('removed')) as number;
     if (!removed) {
@@ -543,6 +550,7 @@ router.delete('/:id/pin/:conversationId', requireAuth, async (req: Request, res:
 
     res.status(204).send();
   } catch (err) {
+    if (err instanceof ContextLaneError) { res.status(err.statusCode).json({error:err.message}); return; }
     console.error('DELETE /api/thoughts/:id/pin error:', err);
     res.status(500).json({ error: 'Failed to unpin thought' });
   } finally {
@@ -646,7 +654,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
-    const result = await session.run(
+    const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(
       `
       MATCH (u:User {id: $userId})
       CREATE (t:Thought {
@@ -687,6 +695,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         pinToConversationId: pinToConversationId ?? null,
       }
     );
+    const result = pinToConversationId ? await session.executeWrite(async tx => {
+      await acquireContextAclLocks(tx,{userIds:[userId],conversationId:pinToConversationId});
+      if (!await checkContextWriteAccess(tx,userId,pinToConversationId)) throw new ContextLaneError(403,'Only current community admins can share announcements.');
+      return persist(tx);
+    }) : await persist(session);
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'User not found' });
@@ -708,6 +721,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     res.status(201).json(thought);
   } catch (err) {
+    if (err instanceof ContextLaneError) { res.status(err.statusCode).json({error:err.message}); return; }
     console.error('POST /api/thoughts error:', err);
     res.status(500).json({ error: 'Failed to create thought' });
   } finally {
@@ -748,7 +762,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const now = new Date().toISOString();
 
-    const result = await session.run(
+    const result = await session.executeWrite(async tx => {
+      await acquireContextAclLocks(tx,{userIds:[userId]});
+      await assertAnnouncementThoughtMutation(tx,userId,String(id));
+      return tx.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
       WHERE t.lane IS NULL OR t.lane <> 'context'
@@ -769,6 +786,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         now,
       }
     );
+    });
 
     if (result.records.length === 0) {
       res.status(404).json({ error: 'Thought not found or not owned by you' });
@@ -791,6 +809,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json(thought);
   } catch (err) {
+    if (err instanceof ContextLaneError) { res.status(err.statusCode).json({error:err.message}); return; }
     console.error('PATCH /api/thoughts/:id error:', err);
     res.status(500).json({ error: 'Failed to update thought' });
   } finally {
@@ -808,7 +827,10 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
   const session = getDriver().session();
   try {
-    const result = await session.run(
+    const result = await session.executeWrite(async tx => {
+      await acquireContextAclLocks(tx,{userIds:[userId]});
+      await assertAnnouncementThoughtMutation(tx,userId,String(id));
+      return tx.run(
       `
       MATCH (u:User {id: $userId})-[:HAS_THOUGHT]->(t:Thought {id: $id})
       WHERE t.lane IS NULL OR t.lane <> 'context'
@@ -817,6 +839,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       `,
       { userId, id }
     );
+    });
 
     const deleted = result.records[0]?.get('deleted');
     const count = typeof deleted === 'object' && deleted !== null && 'toNumber' in deleted
@@ -830,6 +853,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.status(204).send();
   } catch (err) {
+    if (err instanceof ContextLaneError) { res.status(err.statusCode).json({error:err.message}); return; }
     console.error('DELETE /api/thoughts/:id error:', err);
     res.status(500).json({ error: 'Failed to delete thought' });
   } finally {
