@@ -3,7 +3,7 @@
 import { createHmac } from 'node:crypto';
 
 export class BeeperApiError extends Error {
-  constructor(code) { super(({authorization_required:'Approve a read-only Beeper connection on this Mac.',unavailable:'Beeper Desktop is unavailable on this Mac.',incompatible:'This Beeper API response needs review.'})[code]); this.code=code; }
+  constructor(code) { super(({authorization_required:'Approve a read-only Beeper connection on this Mac.',unavailable:'Beeper Desktop is unavailable on this Mac.',incompatible:'This Beeper API response needs review.',stopped:'Beeper source read stopped.'})[code]); this.code=code; }
 }
 const bad=()=>{throw new BeeperApiError('incompatible');};
 const identifier=value=>typeof value==='string'&&value.length>0&&value.length<=2000&&!/[\u0000-\u001f\u007f]/u.test(value)&&!['.','..'].includes(value)?value:bad();
@@ -30,20 +30,23 @@ function page(value){
 
 /** Typed GET-only capability. readToken is a local protected-entry/Keychain
  * callback; it is never populated from a relay job or stored on OpenChat.
- * @param {{readToken:()=>Promise<string>,port?:number,fetchImpl?:typeof fetch,timeoutMs?:number}} options
+ * @param {{readToken:()=>Promise<string>,port?:number,fetchImpl?:typeof fetch,timeoutMs?:number,signal?:AbortSignal}} options
  */
-export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch,timeoutMs=10000}){
+export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch,timeoutMs=10000,signal}){
   if(typeof readToken!=='function'||!Number.isInteger(port)||port<1024||port>65535||!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>30000)bad();
   const origin=`http://127.0.0.1:${port}`;
   async function get(path,query={},beforeFetch){
+    const stopped=()=>{if(signal?.aborted)throw new BeeperApiError('stopped');};
+    stopped();
     const token=await readToken();
+    stopped();
     if(typeof token!=='string'||!token||/[\r\n]/u.test(token))throw new BeeperApiError('authorization_required');
     const url=new URL(path,origin);
     for(const [key,value] of Object.entries(query))if(value!==undefined)url.searchParams.set(key,identifier(value));
     let response;
-    const start=()=>fetchImpl(url,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
+    const start=()=>{stopped();return fetchImpl(url,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs)});};
     try{response=await (beforeFetch?beforeFetch(start):start());}
-    catch(error){if(error?.code==='local_approval_required')throw error;throw new BeeperApiError('unavailable');}
+    catch(error){if(error?.code==='local_approval_required'||error?.code==='stopped')throw error;stopped();throw new BeeperApiError('unavailable');}
     if(response.status===401||response.status===403)throw new BeeperApiError('authorization_required');
     if(!response.ok)throw new BeeperApiError('unavailable');
     if(!response.headers.get('content-type')?.includes('application/json'))bad();

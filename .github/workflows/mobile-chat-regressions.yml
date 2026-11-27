@@ -43,7 +43,7 @@ jobs:
           test/importedChats.mobile.test.ts test/importedChats.test.ts
       - name: Beeper selected-chat client, GET-only adapter and secure-grant boundary
         working-directory: apps/server
-        run: npx vitest run test/beeperClient.mobile.test.ts test/beeperReadIntent.mobile.test.ts test/beeperDesktopApi.test.ts test/beeperReadAuthority.test.ts test/beeperForegroundRunner.test.ts test/beeperRelayTransport.test.ts test/beeperForegroundCli.test.ts test/importedChats.test.ts
+        run: npx vitest run test/beeperClient.mobile.test.ts test/beeperReadIntent.mobile.test.ts test/beeperDesktopApi.test.ts test/beeperReadAuthority.test.ts test/beeperForegroundRunner.test.ts test/beeperRelayTransport.test.ts test/beeperForegroundCli.test.ts test/beeperCliRevocation.test.ts test/importedChats.test.ts
       - name: Message status, agent actions, built-in agent, auto replies and message links
         working-directory: apps/server
         run: >-

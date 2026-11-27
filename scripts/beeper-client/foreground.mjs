@@ -45,9 +45,10 @@ export async function main(argv=process.argv.slice(2)){
  mkdirSync(directory,{recursive:true,mode:0o700});privatePath(directory,true);
  const pairingDirectory=resolve(args['pairing-directory']||join(homedir(),'.paseo','openchat-machine'));
  privatePath(pairingDirectory,true);
- const lock=new BeeperForegroundLease(directory),authority=new BeeperReadAuthority({directory,pairingDirectory});
- let journal;
+ const lock=command==='revoke'?undefined:new BeeperForegroundLease(directory);
+ let journal,authority;
  try{
+  authority=new BeeperReadAuthority({directory,pairingDirectory});
   if(command==='revoke'){
    if(!id(args.grant))failure();authority.revoke(args.grant);console.log('Local grant revoked. Future reads and uploads are denied; already imported copies remain.');return;
   }
@@ -66,7 +67,7 @@ export async function main(argv=process.argv.slice(2)){
   if(config.version!==1||config.connectionId!==connectionId||!id(config.pairRoute)||typeof config.accountId!=='string'||!/^ocbr_[A-Za-z0-9_-]{43}$/.test(config.relayToken))failure();
   const abort=new AbortController(),stop=()=>abort.abort();process.once('SIGINT',stop);process.once('SIGTERM',stop);
   try{
-   const adapter=createBeeperReadonlyClient({readToken:localKeychainToken(config.keychain)}),transport=createBeeperRelayTransport({readToken:async()=>config.relayToken,signal:abort.signal});
+   const adapter=createBeeperReadonlyClient({readToken:localKeychainToken(config.keychain),signal:abort.signal}),transport=createBeeperRelayTransport({readToken:async()=>config.relayToken,signal:abort.signal});
    if(command==='approve-chat'){
     if(!args.chat)failure();
     // This metadata GET is local only; its account is fixed by local setup.
@@ -82,6 +83,6 @@ export async function main(argv=process.argv.slice(2)){
    const runner=createBeeperForegroundRunner({connectionId,transport,authority,adapter,journal,signal:abort.signal,onStatus:status=>console.log(status)});
    await runBeeperForeground({runner,signal:abort.signal});
   }finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}
- }finally{journal?.close();authority.close();lock.close();}
+ }finally{journal?.close();authority?.close();lock?.close();}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(()=>{console.error('Beeper foreground stopped. Check local pairing, approval, Keychain entry and source availability; no private error details were logged.');process.exitCode=1;});
