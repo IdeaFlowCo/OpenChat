@@ -199,11 +199,10 @@ describe('IdeaFlow ID auth routes', () => {
     process.env.GOOGLE_CLIENT_ID = 'google-web-client';
     try {
       for (const host of ['chat.globalbr.ai', 'chat.ideaflow.app']) {
-        const response = await fetch(`${baseUrl}/api/auth/google/url?state=chosen-state`, {
-          headers: { 'x-forwarded-host': host, 'x-forwarded-proto': 'https' },
-        });
+        const response = await request(server).get('/api/auth/google/url?state=chosen-state')
+          .set('Host', host).set('x-forwarded-host', 'other.invalid').set('x-forwarded-proto', 'http');
         expect(response.status).toBe(200);
-        const body = await response.json() as { url: string };
+        const body = response.body as { url: string };
         const authorize = new URL(body.url);
         expect(authorize.searchParams.get('prompt')).toBe('select_account');
         expect(authorize.searchParams.get('redirect_uri')).toBe(`https://${host}/auth/google/callback`);
