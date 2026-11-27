@@ -21,6 +21,7 @@ import {
   getSendDisplay,
   resumeSubmittedSend,
   disableWriteGrant,
+  cancelPreparedSend,
   importWriteOffer,
   listWriteGrants,
   markSubmitAttempt,
@@ -454,4 +455,76 @@ it('rechecks the exact cached receipt, current kernel state and both grants at f
   mac.revoke(f.route);
   expect(() => mac.beforeStatusDisclosure(f.route, f.op, final, start)).toThrow();
   expect(start).toHaveBeenCalledTimes(1);
+});
+
+it('discards an expired unsubmitted draft and permanently spends its operation ID and sequence', async () => {
+  const f = await prepare();
+  local.account = 'other';
+  await expect(cancelPreparedSend('other', f.op)).rejects.toThrow();
+  local.account = 'owner';
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now + 301000);
+  try {
+    await expect(markSubmitAttempt('owner', f.op)).rejects.toThrow();
+    expect((await cancelPreparedSend('owner', f.op)).state).toBe('cancelled');
+    expect((await readWriteGrant('owner', f.route)).pendingOperationId).toBeNull();
+    await expect(
+      prepareSend('owner', f.route, f.chatKey, { operationId: f.op, text: f.text }),
+    ).rejects.toThrow();
+    await expect(resumeSubmittedSend('owner', f.op)).rejects.toThrow();
+    const next = id();
+    await prepareSend('owner', f.route, f.chatKey, { operationId: next, text: 'next draft' });
+    expect((await getSendStatus('owner', next)).sequence).toBe(2);
+    await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+    expect((await readWriteGrant('owner', f.route)).pendingOperationId).toBe(next);
+  } finally {
+    clock.mockRestore();
+  }
+});
+it('refuses local cancellation after the submit fence and after an authenticated unknown result', async () => {
+  const f = await prepare();
+  await markSubmitAttempt('owner', f.op);
+  await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+  await kernel.authorize(f.frame, async () => true);
+  await kernel.dispatch(f.op, {
+    send: async () => {
+      throw Error('transport lost');
+    },
+  });
+  const receipt = mac.sealStatus(f.route, f.op, 'unknown');
+  await recordSendReceipt('owner', f.op, receipt);
+  await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+  expect((await readWriteGrant('owner', f.route)).pendingOperationId).toBe(f.op);
+  expect((await getSendStatus('owner', f.op)).state).toBe('unknown');
+});
+it('recovers a failed slot-clear without making the cancelled draft submit-capable', async () => {
+  const f = await prepare();
+  local.failKey = 'beeper.write.v1.grant.owner.' + f.route;
+  await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+  local.failKey = '';
+  expect((await getSendStatus('owner', f.op)).state).toBe('cancelled');
+  await expect(markSubmitAttempt('owner', f.op)).rejects.toThrow();
+  await cancelPreparedSend('owner', f.op);
+  expect((await readWriteGrant('owner', f.route)).pendingOperationId).toBeNull();
+});
+
+it('serializes a discard racing first submission and preserves attempted and pending source states', async () => {
+  const f = await prepare();
+  const submit = markSubmitAttempt('owner', f.op);
+  await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+  await submit;
+  await kernel.authorize(f.frame, async () => true);
+  await kernel.dispatch(f.op, {
+    send: async () => {
+      await recordSendReceipt('owner', f.op, mac.sealStatus(f.route, f.op, 'attempted'));
+      await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+      return { chatID: chat.id, pendingMessageID: 'fixture-pending' };
+    },
+  });
+  await recordSendReceipt('owner', f.op, mac.sealStatus(f.route, f.op, 'pending'));
+  await expect(cancelPreparedSend('owner', f.op)).rejects.toThrow();
+  expect((await getSendStatus('owner', f.op)).state).toBe('pending');
+  const other = await prepare();
+  const discard = cancelPreparedSend('owner', other.op);
+  await expect(markSubmitAttempt('owner', other.op)).rejects.toThrow();
+  expect((await discard).state).toBe('cancelled');
 });

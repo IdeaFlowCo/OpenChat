@@ -351,6 +351,27 @@ export async function resumeSubmittedSend(account: string, id: string) {
     return frame;
   });
 }
+export async function cancelPreparedSend(account: string, id: string) {
+  return exclusive(async () => {
+    const op = await owned(account, id);
+    const { g, k, state } = await current(account, op.route);
+    // A failed slot-clear may leave a locally cancelled operation here. A Mac
+    // receipt always has a positive revision, and a submit marker is permanent.
+    if (
+      op.revision !== 0 ||
+      (op.state !== 'prepared' && op.state !== 'cancelled') ||
+      state.pending !== id ||
+      state.seq !== op.seq ||
+      g.offer.chatKey !== op.chat
+    )
+      return deny();
+    const cancelled: Op = { ...op, state: 'cancelled' };
+    if (op.state === 'prepared') await save(opKey(id), cancelled);
+    await save(k, { ...state, pending: null });
+    await signedIn(account);
+    return status(id, cancelled);
+  });
+}
 export async function markSubmitAttempt(account: string, id: string) {
   return exclusive(async () => {
     const o = await owned(account, id),
