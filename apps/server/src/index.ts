@@ -1,7 +1,7 @@
 import askPublicationsRoutes from './routes/askPublications.js';
 import visionSaveRoutes from './routes/visionSave.js';
 import visionBridgeRoutes, { visionSessionGuard } from './routes/visionBridge.js';
-import { securityRateLimitMonitor, TRUSTED_PROXY_SETTING } from './services/securityEvent.js';
+import { securityRateLimitMonitor, trustedProxyHop } from './services/securityEvent.js';
 import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
@@ -84,12 +84,9 @@ const connectorDelegation = createConnectorDelegation();
 
 const app = express();
 
-// Behind Cloudflare/GCP LB → noos_nginx → docker. Trust forwarded headers from
-// our own private proxy hops so req.protocol reflects the edge scheme
-// (OpenChat-9jm: /api/auth/google/url redirect_uri) and req.ip is the address
-// nginx saw. `true` trusted every hop, so req.ip was the client-chosen leftmost
-// X-Forwarded-For entry. See services/securityEvent.ts.
-app.set('trust proxy', TRUSTED_PROXY_SETTING);
+// Express IP, protocol and host attribution accept forwarded data only from
+// the operator-pinned immediate nginx peer. Load the pin after dotenv config.
+app.set('trust proxy', trustedProxyHop());
 app.use(securityRateLimitMonitor);
 
 const httpServer = createServer(app);

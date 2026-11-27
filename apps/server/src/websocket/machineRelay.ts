@@ -1,28 +1,21 @@
 // Registration requires a direct OpenChat principal. The route commits to its owner, expiry,
 // and two independent endpoint credentials. The relay stores only their hashes.
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 import type { Server, Socket } from 'socket.io';
 import { validateToken } from '../middleware/auth.js';
-import { securityEvent } from '../services/securityEvent.js';
+import { securityEvent, trustedProxyHop } from '../services/securityEvent.js';
 
-const proxyAddr = createRequire(import.meta.url)('proxy-addr') as {
-  (req: IncomingMessage, trust: (addr: string) => boolean): string;
-  compile(ranges: string[]): (addr: string) => boolean;
-};
 /** Only one concrete, operator-bound nginx peer may supply the nearest forwarded hop.
  * With no pin, record only the transport peer. Addresses never allocate relay capacity.
  */
 export function relayAddressReader(configuredPeer = process.env.OPENCHAT_TRUSTED_PROXY) {
-  if (configuredPeer && (!isIP(configuredPeer) || configuredPeer.includes('%')))
-    throw Error('OPENCHAT_TRUSTED_PROXY must be one literal nginx IP address');
-  const matchesPeer = configuredPeer ? proxyAddr.compile([configuredPeer]) : undefined;
+  const trusted = trustedProxyHop(configuredPeer);
   return (req: IncomingMessage): string => {
     const peer = req.socket.remoteAddress;
     if (!peer || !isIP(peer)) return 'unknown';
-    if (!matchesPeer?.(peer)) return peer;
+    if (!trusted(peer, 0)) return peer;
     // nginx must overwrite XFF with its verified client, or append its own observed
     // peer on the right. Never walk through a second, client-selected proxy.
     const forwarded = req.headers['x-forwarded-for'];
