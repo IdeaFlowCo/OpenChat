@@ -268,9 +268,12 @@ export function setupChatSocket(io: Server): void {
           WHERE ${MESSAGE_ID_BELONGS_TO_SEND}
           MERGE (m)-[:IN_CONVERSATION]->(c)
           MERGE (sender)-[:SENT]->(m)
-          SET c.updatedAt = datetime($now),
-              c.lastMessageAt = datetime($now),
-              c.lastMessagePreview = left(m.content, 100)
+          // Only a new message moves the chat: a late retry of an older send must not
+          // put its text back in the preview or re-sort the chat (as on the REST path).
+          FOREACH (_ IN CASE WHEN coalesce(m._created, false) THEN [1] ELSE [] END |
+            SET c.updatedAt = datetime($now),
+                c.lastMessageAt = datetime($now),
+                c.lastMessagePreview = left(m.content, 100))
           WITH c, m, sender, coalesce(m._created, false) AS wasCreated
           REMOVE m._created
           WITH c, m, sender, wasCreated

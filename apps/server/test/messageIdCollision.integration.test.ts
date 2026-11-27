@@ -115,8 +115,10 @@ integration('a client-chosen message id cannot address another message', () => {
   it('nothing from the refused sends reached the other participant or the chat preview', async () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(bobSaw).toEqual([]);
-    const r = await run('MATCH (c:Conversation {id:$id}) RETURN c.lastMessagePreview AS preview, COUNT { (:Message)-[:IN_CONVERSATION]->(c) } AS linked', { id: sharedId });
+    const r = await run('MATCH (c:Conversation {id:$id}) RETURN c.lastMessagePreview AS preview, c.updatedAt AS updatedAt, c.lastMessageAt AS lastMessageAt, COUNT { (:Message)-[:IN_CONVERSATION]->(c) } AS linked', { id: sharedId });
     expect(r.records[0]!.get('preview')).toBeNull();
+    expect(r.records[0]!.get('updatedAt')).toBeNull();
+    expect(r.records[0]!.get('lastMessageAt')).toBeNull();
     expect(r.records[0]!.get('linked').toNumber()).toBe(1);
   });
 
@@ -141,6 +143,16 @@ integration('a client-chosen message id cannot address another message', () => {
     expect(viaRest.body).toMatchObject({ id, content: 'Synthetic: hello once' });
     const r = await run('MATCH (m:Message {id:$id}) RETURN count(m) AS n', { id });
     expect(r.records[0]!.get('n').toNumber()).toBe(1);
+    // Positive control for the refusals above: Bob's listener is live and saw this real message.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(bobSaw.some(m => m.id === id && m.content === 'Synthetic: hello once')).toBe(true);
+    expect(JSON.stringify(bobSaw)).not.toContain('SECRET-CANARY');
+    // A late retry of an older send does not put its text back in the chat preview.
+    const newer = await send(mallory, { conversationId: sharedId, content: 'Synthetic: the newer message', id: `newer-${suffix}-0003` });
+    expect(newer.success).toBe(true);
+    await send(mallory, { conversationId: sharedId, content: 'Synthetic: hello once', id });
+    const preview = await run('MATCH (c:Conversation {id:$id}) RETURN c.lastMessagePreview AS preview', { id: sharedId });
+    expect(preview.records[0]!.get('preview')).toBe('Synthetic: the newer message');
     // Your own id from another chat is not a retry here: it must not move or relink the message.
     const elsewhere = `own-${suffix}-0002`;
     await run(`MATCH (b:User {id:$bobId}), (p:Conversation {id:$privateId})
