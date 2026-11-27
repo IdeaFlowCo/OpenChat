@@ -91,6 +91,9 @@ export async function loadShareableContext(
   input: { askerId: string; ownerId: string; conversationId: string; messageId: string },
   // All agent-written text needs the owner's explicit opt-in (one switch for asks and agent rules).
   requireOptIn = true,
+  // A person asking in the chat is refused, like a send, while they and anyone here have blocked each other.
+  // A draft for the owner's eyes only needs the owner and the sender not to have blocked each other.
+  refuseAnyBlock = false,
 ): Promise<ShareableContext> {
   // Copy only the identifiers so callers can never pass extra objects as query parameters.
   input = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
@@ -106,9 +109,9 @@ export async function loadShareableContext(
       coalesce(owner.profileAgentEnabled,false) AS enabled,
       owner.profileStatusText AS statusText, owner.profileStatusEmoji AS statusEmoji,
       asker.name AS askerName, coalesce(asker.isBot,false) AS askerIsBot,
-      // Like an ordinary send: a block between the asker and anyone here (not only the owner) means nothing is posted.
-      EXISTS { MATCH (owner)-[:BLOCKED]-(asker) }
-        OR EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> asker.id AND ((asker)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(asker)) } AS blocked,
+      EXISTS { MATCH (owner)-[:BLOCKED]-(asker) } AS blocked,
+      // Anchored on the asker's few block edges, not on every member of a large chat.
+      EXISTS { MATCH (asker)-[:BLOCKED]-(:User)-[:PARTICIPATES_IN]->(c) } AS blockedHere,
       m.content AS text, m.senderId AS senderId, sender.name AS senderName,
       coalesce(m.viaProfileAgent,false) OR coalesce(m.viaAutoResponse,false) OR coalesce(m.viaSecretary,false) AS automatic,
       head(collect(properties(card))) AS card
@@ -116,7 +119,7 @@ export async function loadShareableContext(
   const row = base.records[0];
   if (!row) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (row.get('ownerIsBot') || row.get('askerIsBot')) throw new ProfileAgentError(400, 'bot', 'Agents can only be asked about people');
-  if (row.get('blocked')) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
+  if (row.get('blocked') || (refuseAnyBlock && row.get('blockedHere'))) throw new ProfileAgentError(404, 'unavailable', 'Message unavailable');
   if (requireOptIn && !row.get('enabled')) throw new ProfileAgentError(409, 'off', 'This person has not turned on their OpenChat agent');
   if (row.get('automatic')) throw new ProfileAgentError(400, 'automatic', 'Agents do not answer automatic replies');
 
@@ -246,18 +249,21 @@ export function sanitizeAgentReply(
   let text = cleanText(raw).trim();
   // Never let the model forge the trusted label, the "Asked by" line or an official-sounding author line, quoted or not.
   text = text.split('\n').filter(line => !/🤖|open[\s-]*chat\s*(?:agent|security|support|team|staff)|automatic\s*reply|drafted\s+by|^\W*asked\s+by\b/i.test(line)).join('\n').trim();
-  // Cut before filtering, at a word boundary: a link shortened by the cut is judged as shortened, never kept as a different host.
-  text = clipReply(text);
-  text = text.replace(LINK_CANDIDATE, link => allowed.has(normalizeLink(link)) ? link : '[link removed]');
-  // "[label](address)" would show only the label: break the syntax so every address is read as written.
-  // After the replacement too, so "[link removed]" can never become a label itself.
-  text = text.replace(/\]\(/g, '] (');
   const quoted = text.match(/^["“](.*)["”]$/s);
   if (quoted) text = quoted[1]!.trim();
   text = text.replace(/\n{3,}/g, '\n\n');
-  // If hygiene removed everything, say the honest default.
-  if (!text) text = fallback;
-  return clipReply(text);
+  // Links are judged on text that is already cut to length, so a link shortened by the cut is judged as
+  // shortened and never kept as a different host. "[label](address)" would show only the label: the syntax
+  // is broken after the replacement, so "[link removed]" can never become a label itself.
+  const judge = (value: string) => value
+    .replace(LINK_CANDIDATE, link => allowed.has(normalizeLink(link)) ? link : '[link removed]')
+    .replace(/\]\(/g, '] (');
+  text = judge(clipReply(text));
+  // Replacing a link can lengthen the text. Every further cut is judged again; nothing cut is ever returned unjudged.
+  for (let round = 0; text.length > MAX_REPLY_CHARS && round < 4; round++) text = judge(clipReply(text));
+  // If hygiene removed everything (or the text never settled), say the honest default. Names are participant-chosen: judge it too.
+  if (!text || text.length > MAX_REPLY_CHARS) text = judge(fallback).slice(0, MAX_REPLY_CHARS);
+  return text;
 }
 function clipReply(text: string): string {
   if (text.length <= MAX_REPLY_CHARS) return text;
@@ -407,7 +413,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
       const now = new Date().toISOString();
       const ids = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
       const prepared = input.prepare ? await input.prepare(tx, now) : undefined;
-      const context = prepared?.ctx ?? await loadShareableContext(tx, ids, true);
+      const context = prepared?.ctx ?? await loadShareableContext(tx, ids, true, input.purpose === 'answer');
       if (input.rateLimited) await checkRateLimits(tx, { ...ids, now });
       // Auto-drafts are bounded by the owner's hourly limit too, so strangers cannot drain the allowance.
       // A prepared run did its own checks: other people asking this owner's agent must not block the owner's own asks.
@@ -468,7 +474,7 @@ export async function postAutomaticMessage(driver: Driver, input: {
         MATCH (owner:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
         MATCH (source:Message {id:$replyToId, conversationId:c.id}) WHERE source.deletedAt IS NULL
         AND NOT EXISTS { MATCH (:Message {automaticKey:$key}) }
-        AND (NOT $refuseWhenBlocked OR NOT EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> owner.id AND ((owner)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(owner)) })
+        AND (NOT $refuseWhenBlocked OR NOT EXISTS { MATCH (owner)-[:BLOCKED]-(:User)-[:PARTICIPATES_IN]->(c) })
         AND (coalesce(c.communityKind,'') <> 'announcements' OR EXISTS { MATCH (owner)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] })
         CREATE (m:Message {id:$id, content:$content, senderId:$ownerId, conversationId:c.id, messageType:'text',
           replyToId:$replyToId, automaticKey:$key, createdAt:datetime($now)})
@@ -524,6 +530,8 @@ export async function askProfileAgent(input: {
     ownerId: source.ownerId, conversationId: source.conversationId, replyToId: input.messageId, content,
     idempotencyKey: `profile-agent:${reply.runId}`,
     props: { viaProfileAgent: true, profileAgentOwnerId: source.ownerId, profileAgentAskerId: input.askerId, profileAgentRunId: reply.runId },
+    // The answer is stored as the owner's message: like their own send, not while they and anyone here have blocked each other.
+    refuseWhenBlocked: true,
   });
   if (!posted) throw new ProfileAgentError(409, 'unavailable', 'The chat changed before the answer could be posted');
   if (input.io && input.broadcast) await input.broadcast(input.io, source.conversationId, posted.message);

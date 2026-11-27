@@ -110,7 +110,7 @@ export async function loadThreadContext(
       // A chat with a bot already has its own agent.
       EXISTS { MATCH (bot:User)-[:PARTICIPATES_IN]->(c) WHERE coalesce(bot.isBot,false) AND c.type = 'direct' } AS botChat,
       // The same rule as sending: a block in either direction with anyone here means nothing is posted.
-      EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> asker.id AND ((asker)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(asker)) } AS blocked,
+      EXISTS { MATCH (asker)-[:BLOCKED]-(:User)-[:PARTICIPATES_IN]->(c) } AS blocked,
       m.content AS text, m.transcript AS transcript, m.attachments AS attachments, m.senderId AS senderId, sender.name AS senderName,
       coalesce(m.viaProfileAgent,false) OR coalesce(m.viaAutoResponse,false) OR coalesce(m.viaSecretary,false) AS automatic
   `, ids);

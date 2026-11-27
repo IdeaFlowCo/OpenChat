@@ -98,6 +98,17 @@ it('nothing the app would turn into a link survives unless the asker wrote it', 
   const cutInside = sanitizeAgentReply(`${'word '.repeat(238)}good.example.community/pay tail`, ctx, new Set(['good.example.com']), 'none');
   expect(cutInside.length).toBeLessThanOrEqual(1200);
   expect(webLinks(cutInside)).toEqual([]);
+  // No word boundary near the cut: the raw cut lands exactly after an allowed prefix of a longer, different host.
+  // Removed links before it lengthen the text, so the second cut is the one that matters; it is judged again.
+  const only = new Set(['good.example.com']);
+  const unbroken = `${'evil.example.io '.repeat(4)}${'x'.repeat(1199 - 64 - 'good.example.com'.length - 1)}/good.example.com.au/tail-that-is-cut-away`;
+  for (const pad of [0, 1, 2, 3, 20, 21, 22, 23, 40]) {
+    const clipped = sanitizeAgentReply(`${'y'.repeat(pad)} ${unbroken}`, ctx, only, 'none');
+    expect(clipped.length, String(pad)).toBeLessThanOrEqual(1200);
+    expect(webLinks(clipped).map(l => l.url).filter(url => url !== 'https://good.example.com.au'), `${pad}: …${clipped.slice(-40)}`).toEqual([]);
+  }
+  // A participant-chosen name in the fallback line is judged too.
+  expect(webLinks(sanitizeAgentReply('🤖 only a label', { ...ctx, ownerName: 'evil.example.com' }))).toEqual([]);
   // The asker's own links are kept exactly, with or without the scheme they typed.
   expect(sanitizeAgentReply('Plan: https://example.test/plan, pay at good.example.com/pay.', ctx, allowed)).toBe('Plan: https://example.test/plan, pay at good.example.com/pay.');
   expect(webLinks(sanitizeAgentReply('Plan: https://example.test/plan', ctx, allowed)).map(l => l.url)).toEqual(['https://example.test/plan']);

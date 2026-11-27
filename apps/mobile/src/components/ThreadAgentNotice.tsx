@@ -26,10 +26,10 @@ export function threadAgentFailureText(code: string | undefined): string {
  * says before sending who will see the answer, and afterwards shows that the
  * agent is working or why it did not answer. Only the sender sees this line.
  */
-export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = true, connected = true }: {
+export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = true, connected }: {
   conversationId: string; text: string; onInsert: () => void;
   /** Live connection state: the listener is attached again whenever the socket (re)connects. */
-  connected?: boolean;
+  connected: boolean;
   /** False while editing, or where @agent mentions a person: progress and refusals still show. */
   offerTag?: boolean;
 }) {

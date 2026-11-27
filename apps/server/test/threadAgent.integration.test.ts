@@ -194,6 +194,15 @@ integration('@agent answers about the thread from what everyone in it can read',
       const samsMessage = await send('t2', 'sam', 'Synthetic: Sam in trio', 'trio');
       await expect(agent.askProfileAgent({ driver, askerId: id('cal'), messageId: samsMessage, question: 'PROBE', generate, io, broadcast })).rejects.toMatchObject({ statusCode: 404 });
       expect(prompts).toHaveLength(0);
+      // And the other way round: Sam's agent answers as Sam. Had Sam and Eve blocked each other, Cal's ask of
+      // Sam's agent would not be posted here either (checked when posting, as for Sam's own sends).
+      await run('MATCH (:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') });
+      await run('MATCH (e:User {id:$eve}),(s:User {id:$sam}) CREATE (e)-[:BLOCKED]->(s)', { eve: id('eve'), sam: id('sam') });
+      await expect(agent.askProfileAgent({ driver, askerId: id('cal'), messageId: samsMessage, generate, io, broadcast })).rejects.toMatchObject({ statusCode: 409 });
+      expect(broadcasts).toHaveLength(0);
+      await run('MATCH (:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') });
+      await run('MATCH (e:User {id:$eve}),(c:User {id:$cal}) CREATE (e)-[:BLOCKED]->(c)', { eve: id('eve'), cal: id('cal') });
+      prompts.length = 0;
       await expect(ask('sam', old)).resolves.toBeDefined();
       // A block made while the model is working still stops the post.
       await run('MATCH (e:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') });

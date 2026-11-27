@@ -1,12 +1,12 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ avail: vi.fn(), ask: vi.fn(), handlers: new Map<string, (payload: unknown) => void>() }));
+const mocks = vi.hoisted(() => ({ avail: vi.fn(), ask: vi.fn(), on: vi.fn(), off: vi.fn(), handlers: new Map<string, (payload: unknown) => void>() }));
 vi.mock('react-native', () => ({ ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 } }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/components/ui', () => ({ Button: (p: unknown) => React.createElement('Button', p) }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: (p: unknown) => React.createElement('AppIcon', p) }));
-vi.mock('../../mobile/src/api/socket', () => ({ getSocket: () => ({ on: (e: string, h: (p: unknown) => void) => mocks.handlers.set(e, h), off: (e: string) => mocks.handlers.delete(e) }) }));
+vi.mock('../../mobile/src/api/socket', () => ({ getSocket: () => ({ on: (e: string, h: (p: unknown) => void) => { mocks.on(e, h); mocks.handlers.set(e, h); }, off: (e: string, h: unknown) => { mocks.off(e, h); mocks.handlers.delete(e); } }) }));
 vi.mock('../../mobile/src/api/client', async () => {
   const { ApiError } = await import('../../mobile/src/api/errors');
   return { ApiError, api: { getProfileAgentAvailability: mocks.avail, askProfileAgent: mocks.ask } };
@@ -18,7 +18,7 @@ let screen: ReactTestRenderer;
 beforeEach(() => { vi.resetAllMocks(); mocks.handlers.clear(); vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; mocks.avail.mockResolvedValue({ enabled: true, available: true }); });
 afterEach(async () => { await act(async () => screen?.unmount()); vi.useRealTimers(); delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 const texts = () => screen.root.findAllByType('Text').map(n => [n.props.children].flat().join('')).join(' | ');
-const notice = (text: string, onInsert = vi.fn(), conversationId = 'c') => React.createElement(ThreadAgentNotice, { conversationId, text, onInsert });
+const notice = (text: string, onInsert = vi.fn(), conversationId = 'c') => React.createElement(ThreadAgentNotice, { conversationId, text, onInsert, connected: true });
 
 it('says who will see the answer before a tagged message is sent, and nothing for ordinary text', async () => {
   await act(async () => { screen = create(notice('lunch tomorrow?')); });
@@ -59,7 +59,7 @@ it('shows only this chat’s progress, explains a refusal in plain words and cle
 });
 
 it('an answer clears only its own message’s line, and progress shows even where the tag is not offered', async () => {
-  await act(async () => { screen = create(React.createElement(ThreadAgentNotice, { conversationId: 'c', text: '@agent typed while editing', onInsert: vi.fn(), offerTag: false })); });
+  await act(async () => { screen = create(React.createElement(ThreadAgentNotice, { conversationId: 'c', text: '@agent typed while editing', onInsert: vi.fn(), offerTag: false, connected: true })); });
   expect(screen.toJSON()).toBeNull();
   const emit = (payload: unknown) => act(async () => { mocks.handlers.get('agent-reply:status')!(payload); });
   await emit({ conversationId: 'c', messageId: 'newer', state: 'working' });
@@ -74,8 +74,11 @@ it('an answer clears only its own message’s line, and progress shows even wher
 it('attaches its listener again when the connection comes up after the chat opened', async () => {
   const props = { conversationId: 'c', text: '', onInsert: vi.fn() };
   await act(async () => { screen = create(React.createElement(ThreadAgentNotice, { ...props, connected: false })); });
-  mocks.handlers.clear(); // the socket that existed before connecting is gone
+  // Re-attaching first detaches from the socket it was on, then attaches once.
+  mocks.off.mockClear(); mocks.on.mockClear();
   await act(async () => { screen.update(React.createElement(ThreadAgentNotice, { ...props, connected: true })); });
+  expect(mocks.off).toHaveBeenCalledExactlyOnceWith('agent-reply:status', expect.any(Function));
+  expect(mocks.on).toHaveBeenCalledExactlyOnceWith('agent-reply:status', expect.any(Function));
   expect(mocks.handlers.has('agent-reply:status')).toBe(true);
   await act(async () => { mocks.handlers.get('agent-reply:status')!({ conversationId: 'c', messageId: 'm', state: 'working' }); });
   expect(texts()).toContain('Your agent is reading this chat');
