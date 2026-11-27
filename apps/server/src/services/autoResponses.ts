@@ -320,6 +320,8 @@ export async function ensureProfileAgentIndexes(driver: Driver) {
     await s.run('CREATE INDEX auto_response_draft_owner IF NOT EXISTS FOR (d:AutoResponseDraft) ON (d.ownerId, d.status)');
     await s.run('CREATE INDEX profile_agent_run_asker IF NOT EXISTS FOR (r:ProfileAgentRun) ON (r.askerId)');
     await s.run('CREATE INDEX profile_agent_run_owner IF NOT EXISTS FOR (r:ProfileAgentRun) ON (r.ownerId)');
+    // Per-chat hourly bound for @agent (threadAgent.ts).
+    await s.run('CREATE INDEX profile_agent_run_conversation IF NOT EXISTS FOR (r:ProfileAgentRun) ON (r.conversationId)');
     await s.run('CREATE INDEX auto_response_event_owner IF NOT EXISTS FOR (e:AutoResponseEvent) ON (e.ownerId, e.conversationId)');
     // Idempotency lookups for agent and automatic posts.
     await s.run('CREATE INDEX message_automatic_key IF NOT EXISTS FOR (m:Message) ON (m.automaticKey)');

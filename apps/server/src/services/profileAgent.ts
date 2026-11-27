@@ -66,7 +66,7 @@ export function globalMonthlyCapMicros(env: NodeJS.ProcessEnv = process.env): nu
 export const MAX_OUTPUT_TOKENS = 400;
 export const LIMITS = { askerPerHour: 10, askerOwnerPerHour: 5, ownerPerHour: 40, perMessage: 2 } as const;
 const MAX_REPLY_CHARS = 1200;
-const MAX_QUESTION_CHARS = 500;
+export const MAX_QUESTION_CHARS = 500;
 
 export const monthKey = (date = new Date()) => date.toISOString().slice(0, 7);
 
@@ -126,6 +126,32 @@ export async function loadShareableContext(
   );
   const status = card.status ? [card.status.emoji, card.status.text].filter(Boolean).join(' ') : null;
 
+  const shared = await loadOwnerSharedInChat(tx, input);
+  return {
+    ownerId: input.ownerId,
+    ownerName,
+    askerName: safeName(row.get('askerName')),
+    conversationId: input.conversationId,
+    profile: { headline: card.headline, status, links: [card.linkedIn, card.x, card.link].filter((v): v is string => !!v) },
+    ...shared,
+    message: {
+      id: input.messageId,
+      text: String(row.get('text') ?? '').slice(0, 4000),
+      senderName: safeName(row.get('senderName')),
+      fromOwner: row.get('senderId') === input.ownerId,
+    },
+  };
+}
+
+/**
+ * What the owner wrote and shared into this conversation: their pinned Stream
+ * items and, when the reader may read Context here, their Context posts.
+ */
+export async function loadOwnerSharedInChat(
+  tx: ManagedTransaction,
+  input: { askerId: string; ownerId: string; conversationId: string },
+): Promise<Pick<ShareableContext, 'sharedNotes' | 'contextPosts'>> {
+  input = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId };
   const notes = await tx.run(`
     MATCH (t:Thought {userId:$ownerId})-[p:PINNED_IN]->(:Conversation {id:$conversationId})
     WHERE t.deletedAt IS NULL AND (t.lane IS NULL OR t.lane <> 'context')
@@ -145,25 +171,14 @@ export async function loadShareableContext(
     contextPosts = posts.records.map(r => String(r.get('text'))).filter(Boolean);
   }
   return {
-    ownerId: input.ownerId,
-    ownerName,
-    askerName: safeName(row.get('askerName')),
-    conversationId: input.conversationId,
-    profile: { headline: card.headline, status, links: [card.linkedIn, card.x, card.link].filter((v): v is string => !!v) },
     sharedNotes: notes.records.map(r => ({ text: String(r.get('text')), status: r.get('status') ?? null })).filter(n => n.text),
     contextPosts,
-    message: {
-      id: input.messageId,
-      text: String(row.get('text') ?? '').slice(0, 4000),
-      senderName: safeName(row.get('senderName')),
-      fromOwner: row.get('senderId') === input.ownerId,
-    },
   };
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 export interface AgentPrompt { system: string; user: string }
-export type AgentPurpose = 'answer' | 'auto-draft';
+export type AgentPurpose = 'answer' | 'auto-draft' | 'thread';
 
 export function buildAgentPrompt(ctx: ShareableContext, question: string | undefined, purpose: AgentPurpose = 'answer'): AgentPrompt {
   // Names are participant-controlled: only ever quoted, single-line and bounded (safeName).
@@ -206,8 +221,8 @@ export function safeName(raw: unknown): string {
  * Anything a client might turn into a link: schemes, scheme-less //, www., and
  * bare domains with any 2+ letter ending (a superset of the client linkifier).
  */
-const LINK_CANDIDATE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'“”‘’`]+|(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
-const normalizeLink = (link: string) => link.replace(/[.,;:!?)\]]+$/, '').replace(/^[a-z][a-z0-9+.-]*:\/*|^\/\//i, '').replace(/^www\./i, '').toLowerCase();
+export const LINK_CANDIDATE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>"'“”‘’`]+|(?:\b[a-z][a-z0-9+.-]*:\/*|\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>()[\]"'“”‘’`]*)?/giu;
+export const normalizeLink = (link: string) => link.replace(/[.,;:!?)\]]+$/, '').replace(/^[a-z][a-z0-9+.-]*:\/*|^\/\//i, '').replace(/^www\./i, '').toLowerCase();
 /** Links found in text the owner wrote and shared here. */
 export function ownerLinks(ctx: ShareableContext): Set<string> {
   const sources = [...ctx.profile.links, ...ctx.sharedNotes.map(n => n.text), ...ctx.contextPosts, ctx.message.fromOwner ? ctx.message.text : ''];
@@ -216,9 +231,8 @@ export function ownerLinks(ctx: ShareableContext): Set<string> {
   return found;
 }
 
-export function sanitizeAgentReply(raw: string, ctx: ShareableContext): string {
+export function sanitizeAgentReply(raw: string, ctx: ShareableContext, allowed: Set<string> = ownerLinks(ctx)): string {
   // Links may only repeat, exactly, a link the owner wrote; an asker cannot launder one through someone else's agent.
-  const allowed = ownerLinks(ctx);
   let text = cleanText(raw).trim();
   // Never let the model forge the trusted label or an author line, quoted or not.
   text = text.split('\n').filter(line => !/🤖|openchat\s*agent|automatic\s*reply|drafted\s+by/i.test(line)).join('\n').trim();
@@ -336,6 +350,12 @@ export interface MeteredInput {
   /** Rate limits apply to people asking; auto-drafts are bounded by their own cooldown. */
   rateLimited: boolean;
   generate?: ProfileAgentGenerator;
+  /**
+   * Replaces the default reader and prompt (the thread agent). Runs inside the
+   * reservation transaction, after the ACL locks, and must do its own
+   * eligibility and rate checks. `allowedLinks` are the only links the reply may keep.
+   */
+  prepare?: (tx: ManagedTransaction, now: string) => Promise<{ ctx: ShareableContext; prompt: AgentPrompt; allowedLinks: Set<string> }>;
 }
 export interface MeteredReply { runId: string; ctx: ShareableContext; text: string; costMicros: number }
 
@@ -348,16 +368,18 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
   let reserved = 0;
   let ctx: ShareableContext;
   let prompt: AgentPrompt;
+  let allowedLinks: Set<string> | undefined;
   try {
-    ({ ctx, prompt, reserved } = await session.executeWrite(async tx => {
+    ({ ctx, prompt, reserved, allowedLinks } = await session.executeWrite(async tx => {
       await acquireContextAclLocks(tx, { userIds: [input.ownerId, input.askerId] });
       const now = new Date().toISOString();
       const ids = { askerId: input.askerId, ownerId: input.ownerId, conversationId: input.conversationId, messageId: input.messageId };
-      const context = await loadShareableContext(tx, ids, true);
+      const prepared = input.prepare ? await input.prepare(tx, now) : undefined;
+      const context = prepared?.ctx ?? await loadShareableContext(tx, ids, true);
       if (input.rateLimited) await checkRateLimits(tx, { ...ids, now });
       // Auto-drafts are bounded by the owner's hourly limit too, so strangers cannot drain the allowance.
       else await checkOwnerRate(tx, { ownerId: ids.ownerId, now });
-      const built = buildAgentPrompt(context, input.question, input.purpose);
+      const built = prepared?.prompt ?? buildAgentPrompt(context, input.question, input.purpose);
       const micros = reservationMicros(model, built);
       await reserveBudget(tx, { ownerId: input.ownerId, micros, month });
       await tx.run(`CREATE (:ProfileAgentRun {id:$runId, askerId:$askerId, ownerId:$ownerId, messageId:$messageId,
@@ -366,7 +388,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
         runId, askerId: input.askerId, ownerId: input.ownerId, messageId: input.messageId, conversationId: input.conversationId,
         purpose: input.purpose, model, micros, now, digest: createHash('sha256').update(input.question ?? '').digest('hex'),
       });
-      return { ctx: context, prompt: built, reserved: micros };
+      return { ctx: context, prompt: built, reserved: micros, allowedLinks: prepared?.allowedLinks };
     }));
   } finally { await session.close(); }
 
@@ -381,7 +403,7 @@ export async function generateMeteredReply(input: MeteredInput): Promise<Metered
 
   // A failed or timed-out call may still be billed upstream: keep the worst-case reservation.
   const actual = generated ? costMicros(model, generated.inputTokens, generated.outputTokens) : reserved;
-  const text = generated ? sanitizeAgentReply(generated.text, ctx) : '';
+  const text = generated ? sanitizeAgentReply(generated.text, ctx, allowedLinks) : '';
   const settle = input.driver.session();
   try {
     await settle.executeWrite(async tx => {

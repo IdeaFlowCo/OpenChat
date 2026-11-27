@@ -46,6 +46,8 @@ import { MessageActionSheet, ReplyToData } from '../components/MessageActionShee
 import { ReactionsBar } from '../components/ReactionsBar';
 import { MessageStatusChips } from '../components/MessageStatusChips';
 import { AutoResponseDraftNotice } from '../components/AutoResponseDraftNotice';
+import { ThreadAgentNotice } from '../components/ThreadAgentNotice';
+import { insertAgentTag } from '../utils/agentTag';
 import { useMessageStatuses } from '../hooks/useMessageStatuses';
 import { ToastMessage } from '../components/ToastMessage';
 import { useChat } from '../contexts/ChatContext';
@@ -742,6 +744,15 @@ export function ChatScreen({
     () => conversation?.participants?.some(p => p?.user?.isBot) ?? false,
     [conversation]
   );
+  // @agent (openchat-6zn): offered in chats between people, in the Chat lane, when composing a new message.
+  const canTagAgent = activeConversationLane === 'chat' && !!conversationId && !editingMessage
+    && !(!isGroup && other?.isBot) && conversation?.communityKind !== 'announcements';
+  const tagAgent = useCallback(() => {
+    setText(current => insertAgentTag(current));
+    setMentionQuery(null);
+    mentionAtOffset.current = -1;
+    textInputRef.current?.focus();
+  }, []);
 
   // Mute menu logic (OpenChat-aes)
   const isMuted = !!mutedConvs[conversationId];
@@ -2142,6 +2153,10 @@ export function ChatScreen({
               <AppIcon name="thought" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Stream for this chat</Text>
             </TouchableOpacity>
+            {canTagAgent && <TouchableOpacity onPress={() => { setConversationMenuVisible(false); tagAgent(); }} style={styles.conversationMenuRow} accessibilityRole="menuitem">
+              <AppIcon name="bot" color={c.primary} size={20} />
+              <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>Ask @agent in this chat</Text>
+            </TouchableOpacity>}
             <TouchableOpacity onPress={openAgentNetwork} style={styles.conversationMenuRow} accessibilityRole="menuitem">
               <AppIcon name="bot" color={c.primary} size={20} />
               <Text style={[styles.conversationMenuLabel, { color: c.textPrimary }]}>OpenChat Agent</Text>
@@ -2451,6 +2466,8 @@ export function ChatScreen({
         </View>
       )}
       {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
+      {/* @agent: your own agent answers in this chat (openchat-6zn). Not in bot or announcement chats, never while editing. */}
+      {canTagAgent && <ThreadAgentNotice conversationId={conversationId} text={text} onInsert={tagAgent} />}
 
       {announcementReadOnly ? <View testID="announcements-read-only" style={{ padding: space[4], backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
         <Text style={[type.body, { color: c.textMetadata }]}>Only community admins can post announcements.</Text>

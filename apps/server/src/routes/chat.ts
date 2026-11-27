@@ -26,6 +26,7 @@ import { resolveMentionedUserIds } from '../services/messageMentions.js';
 import { connectorMessageId, parseMessageProvenance, provenanceBelongsToSender, scheduleVisionReplyDelivery } from '../services/visionBridge.js';
 import { maybeTriggerAssistant } from '../services/assistantTrigger.js';
 import { maybeTriggerSecretary } from '../services/secretary.js';
+import { maybeTriggerThreadAgent } from '../services/threadAgent.js';
 import { dispatchMessageEvent } from '../services/webhookDispatch.js';
 import { embedAndStoreMessage, semanticSearchMessages, embeddingsEnabled } from '../services/embeddings.js';
 import { maybeTranscribeMessage } from '../services/transcribeVoice.js';
@@ -1384,6 +1385,15 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // bot, fire an assistant turn asynchronously. No-ops when the sender is the
     // bot itself (loop guard inside maybeTriggerAssistant).
     if (!isVoiceOnly) {
+      // "@agent" tag: the sender's own built-in agent answers about this thread (openchat-6zn).
+      // Signed-in people only, once per stored message; a retried send never asks twice.
+      if (wasCreated) {
+        void maybeTriggerThreadAgent({
+          driver: getDriver(), io, senderId: userId, conversationId: conversationId as string, messageId: String(message.id), content: messageContent,
+          human: !(req.agentKeyId || req.connectorDelegation || connectorPrincipal || req.user?.embedded),
+          broadcast: broadcastMessageToParticipants,
+        });
+      }
       maybeTriggerAssistant({ senderId: userId, conversationId: conversationId as string, io, messageId: String(message.id) });
       maybeTriggerSecretary({
         senderId: userId,

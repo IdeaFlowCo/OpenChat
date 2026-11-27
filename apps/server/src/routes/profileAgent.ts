@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { getConnectorPrincipal } from '../lib/ideaflowConnector.js';
 import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
 import { askProfileAgent, getOwnerUsage, isProfileAgentAvailable, profileAgentAvailability, ProfileAgentError } from '../services/profileAgent.js';
+import { askThreadAgent } from '../services/threadAgent.js';
 import {
   AutoResponseError, createRule, deleteRule, discardDraft, listDrafts, listRules, sendDraft, setProfileAgentEnabled, updateRule,
 } from '../services/autoResponses.js';
@@ -25,14 +26,19 @@ const fail = (res: Response, error: unknown) => {
   res.status(500).json({ error: 'Request failed' });
 };
 
-/** POST /api/chat/agent-reply {messageId, question?} — answer instantly, posted to the chat. */
+/**
+ * POST /api/chat/agent-reply {messageId, question?, agent?} — answer instantly, posted to the chat.
+ * agent omitted: the message author's agent, from what they shared. agent:"mine": the asker's own
+ * agent, about this thread (the same service as tagging @agent in a message).
+ */
 export const agentReplyRouter = Router();
 agentReplyRouter.post('/', requireAuth, humanOnly, async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
-  const { messageId, question } = req.body ?? {};
+  const { messageId, question, agent } = req.body ?? {};
   if (typeof messageId !== 'string' || !messageId) { res.status(400).json({ error: 'messageId is required' }); return; }
+  if (agent !== undefined && agent !== 'mine') { res.status(400).json({ error: 'agent must be "mine" when given' }); return; }
   try {
-    const posted = await askProfileAgent({
+    const posted = await (agent === 'mine' ? askThreadAgent : askProfileAgent)({
       driver: getDriver(), io: req.app.get('io'), askerId: req.user!.userId, messageId,
       question: typeof question === 'string' && question.trim() ? question : undefined,
       broadcast: broadcastMessageToParticipants,
@@ -45,6 +51,8 @@ agentReplyRouter.get('/availability', requireAuth, humanOnly, async (req: Reques
   res.set('Cache-Control', 'no-store');
   if (typeof req.query.messageId !== 'string' || !req.query.messageId) { res.status(400).json({ error: 'messageId is required' }); return; }
   try {
+    // Your own agent needs no opt-in from anyone else: asking is your explicit act each time.
+    if (req.query.agent === 'mine') { res.json({ enabled: true, available: isProfileAgentAvailable() }); return; }
     const result = await profileAgentAvailability(getDriver(), req.user!.userId, req.query.messageId);
     if (!result) { res.status(404).json({ error: 'Message unavailable' }); return; }
     res.json(result);

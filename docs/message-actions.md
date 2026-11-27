@@ -60,6 +60,38 @@ Hold a message in the canonical client to open its actions.
     message. Human sessions only (agent keys and connectors are refused).
   - **Model and key:** the existing `ANTHROPIC_API_KEY` and `ASSISTANT_MODEL`
     (default `claude-haiku-4-5`). `OPENCHAT_PROFILE_AGENT_ENABLED=false` is the kill switch.
+- **@agent / Ask my agent** (openchat-6zn): *your own* built-in agent answers
+  about the current thread, in that chat. Three doors, one service
+  (`services/threadAgent.ts`):
+  typing `@agent` anywhere in a message (the composer offers it when you type `@`
+  and says, before you send, that everyone in the chat will see the answer);
+  the chat's **⋯** menu › **Ask @agent in this chat**; and holding your own message ›
+  **Ask my agent** (`POST /api/chat/agent-reply {messageId, question?, agent:"mine"}`).
+  The answer is a reply to the tagged or selected message, stored with you as sender,
+  labelled `🤖 {you}'s OpenChat agent · not {you}` and `Asked by {you}`.
+  - **What it can read:** only what everyone in the chat can already read: the newest
+    40 live messages of that one conversation (600 characters each, 12,000 in total,
+    voice notes by transcript) under the senders' public names, plus the Stream items
+    and Context posts *you* shared there. Never private notes, the private people
+    graph, your private names for contacts, private message statuses, the private
+    assistant's page context, other chats, your card or account fields
+    (`loadThreadContext` is the only reader; `threadAgent.integration.test.ts` seeds
+    private canaries and asserts none reaches the model or the reply).
+  - **The tag:** `@agent` as its own word, case-insensitive. `@agents`, `@agent-smith`,
+    `name@agent.example` and lookalike characters are not tags. In a chat where another
+    participant's name starts with "agent", the tag stays that person's mention and
+    nothing runs. `@agent` alone means "catch me up".
+  - **Injection:** every message is another participant's untrusted text, passed as
+    JSON data. The model has no tools and at most 400 output tokens. Forged label lines are
+    removed. A link survives only if *you* wrote it in this chat, so nobody can launder a
+    link through your agent; other links become `[link removed]`.
+  - **Consent and limits:** no standing opt-in, because each answer is your own explicit
+    act and spends your own **$2 per month** allowance (same meter and global ceiling as
+    above). 20 thread answers per person per hour, 8 per chat per hour, 2 per message.
+    Signed-in people only: messages sent with an API key, a connector or an embedded
+    session never trigger it. Not in direct chats with a bot or in announcement chats.
+    The trigger never delays or fails the send; only the sender is told about progress
+    or a refusal (`agent-reply:status` on their own sockets, codes only).
 - **Auto replies** (Chats → Profile → Auto replies, and Settings → Auto replies) keeps
   the existing opt-in Secretary (exact quick answers) and adds **auto-response rules**:
   when I'm away, from these people, about these words → reply with my text, or let

@@ -1604,18 +1604,21 @@ export const api = {
     request<{ ok: boolean }>(`/api/secretary/answers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // ── Built-in OpenChat agent and auto-responses ────────────────────────────
-  /** Ask the message author's built-in agent; its labelled answer is posted into the chat. */
-  askProfileAgent: async (messageId: string, question?: string) => {
+  /**
+   * Ask the message author's built-in agent; its labelled answer is posted into the chat.
+   * With agent "mine", your own agent answers about this thread instead (as tagging @agent does).
+   */
+  askProfileAgent: async (messageId: string, question?: string, agent?: 'mine') => {
     // The model call can take a while; a refusal must never sign the asker out.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
     try {
-      return await request<{ message: Message }>('/api/chat/agent-reply', { method: 'POST', body: JSON.stringify(question ? { messageId, question } : { messageId }), signal: controller.signal, expireAuthOnForbidden: false });
+      return await request<{ message: Message }>('/api/chat/agent-reply', { method: 'POST', body: JSON.stringify({ messageId, ...(question ? { question } : {}), ...(agent ? { agent } : {}) }), signal: controller.signal, expireAuthOnForbidden: false });
     } finally { clearTimeout(timer); }
   },
   /** Whether the message's author has turned on their agent (participants only). */
-  getProfileAgentAvailability: (messageId: string) =>
-    timedRequest<{ enabled: boolean; available: boolean }>(`/api/chat/agent-reply/availability?messageId=${encodeURIComponent(messageId)}`, { expireAuthOnForbidden: false }),
+  getProfileAgentAvailability: (messageId: string, agent?: 'mine') =>
+    timedRequest<{ enabled: boolean; available: boolean }>(`/api/chat/agent-reply/availability?messageId=${encodeURIComponent(messageId)}${agent ? '&agent=mine' : ''}`, { expireAuthOnForbidden: false }),
   getAutoResponseSettings: () => request<AutoResponseSettings>('/api/auto-responses/settings'),
   setProfileAgentEnabled: (profileAgentEnabled: boolean) =>
     request<{ profileAgentEnabled: boolean; available: boolean }>('/api/auto-responses/settings', { method: 'PUT', body: JSON.stringify({ profileAgentEnabled }) }),
