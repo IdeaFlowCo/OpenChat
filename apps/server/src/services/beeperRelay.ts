@@ -50,7 +50,7 @@ export function parseBeeperReadOffer(body:unknown):BeeperReadOffer {
 }
 
 /** Bound to the locally approved recipient/source tuple, not an editable public offer. */
-export function beeperRelayBinding(token:string,offer:Pick<BeeperReadOffer,'protocol'|'connectionId'|'ownerUserId'|'machineKey'|'deviceKey'|'accountKey'|'catalogueGrantId'|'expiresAt'|'destination'|'network'>){
+export function beeperRelayBinding(token:string,offer:Pick<BeeperReadOffer,'protocol'|'connectionId'|'ownerUserId'|'machineKey'|'deviceKey'|'accountKey'|'catalogueGrantId'|'expiresAt'|'destination'|'network'>|(Connection&{connectionId:string})){
   return createHmac('sha256',token).update(JSON.stringify([offer.protocol,offer.connectionId,offer.ownerUserId,offer.machineKey,offer.deviceKey,offer.accountKey,offer.catalogueGrantId,offer.expiresAt,offer.destination,...(offer.protocol==='openchat.beeper.imessage.read.v1'?[offer.network]:[])])).digest('hex');
 }
 
@@ -106,7 +106,7 @@ async function relay<T>(token:string,action:(tx:Tx,c:Connection)=>Promise<T>):Pr
   return ownerConnection(ownerUserId!,connectionId!,async(tx,c)=>{
     active(c);
     approvedNetwork(c);
-    const expected=beeperRelayBinding(token,{...c,connectionId:c.id} as BeeperReadOffer);
+    const expected=beeperRelayBinding(token,{...c,connectionId:c.id});
     if(c.destination!=='https://chat.ideaflow.app'||!hex(c.relayBinding,64)||!timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(c.relayBinding,'hex')))fail(403,'relay_owner_binding_mismatch');
     const r=await tx.run(`MATCH(c:OpenChatBeeperConnection {id:$connectionId,ownerUserId:$ownerUserId,relayTokenHash:$tokenHash}) RETURN c.id AS id`,{connectionId,ownerUserId,tokenHash});
     if(!r.records.length)fail(401,'relay_not_authorized');return action(tx,c);
