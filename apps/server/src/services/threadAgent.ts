@@ -85,7 +85,11 @@ export function parseAgentTag(content: unknown): { question: string } | null {
 
 // ── Thread context (the privacy boundary) ────────────────────────────────────
 export interface ThreadLine { from: string; fromAsker: boolean; automatic: boolean; text: string }
-export interface ThreadContext extends ShareableContext { thread: ThreadLine[]; conversationType: string }
+export interface ThreadContext extends ShareableContext {
+  thread: ThreadLine[]; conversationType: string;
+  /** Links in the asker's own messages, read from the whole text before any line is shortened. */
+  askerLinks: string[];
+}
 
 /**
  * Reads only material every participant of the chat can already see. Throws
@@ -128,6 +132,7 @@ export async function loadThreadContext(
     ORDER BY m.createdAt DESC
   `, ids);
   const thread: ThreadLine[] = [];
+  const askerLinks: string[] = [];
   let budget = THREAD_LIMITS.totalChars;
   for (const r of recent.records) {
     // The assistant's private page context is deliberately not passed: only what the chat shows.
@@ -135,6 +140,10 @@ export async function loadThreadContext(
     if (!text) continue;
     if (text.length > budget) break;
     budget -= text.length;
+    if (r.get('senderId') === ids.askerId && r.get('automatic') !== true && r.get('senderIsBot') !== true) {
+      // From the unshortened message: a link cut by the per-line limit must not become a different, allowed host.
+      for (const match of lineText(r.get('content'), null, null, 20_000).matchAll(LINK_CANDIDATE)) askerLinks.push(normalizeLink(match[0]));
+    }
     thread.push({
       from: safeName(r.get('senderName')),
       fromAsker: r.get('senderId') === ids.askerId,
@@ -162,6 +171,7 @@ export async function loadThreadContext(
       fromOwner: row.get('senderId') === ids.askerId,
     },
     thread,
+    askerLinks,
   };
 }
 
@@ -177,12 +187,8 @@ function lineText(content: unknown, transcript: unknown, attachments: unknown, m
 
 /** Links the asker wrote here: the only ones their agent may repeat. */
 export function threadOwnerLinks(ctx: ThreadContext): Set<string> {
-  const sources = [
-    ...ctx.sharedNotes.map(n => n.text), ...ctx.contextPosts,
-    ...ctx.thread.filter(line => line.fromAsker && !line.automatic).map(line => line.text),
-    ctx.message.fromOwner ? ctx.message.text : '',
-  ];
-  const found = new Set<string>();
+  const sources = [...ctx.sharedNotes.map(n => n.text), ...ctx.contextPosts, ctx.message.fromOwner ? ctx.message.text : ''];
+  const found = new Set<string>(ctx.askerLinks);
   for (const source of sources) for (const match of cleanText(source).matchAll(LINK_CANDIDATE)) found.add(normalizeLink(match[0]));
   return found;
 }

@@ -145,6 +145,8 @@ integration('@agent answers about the thread from what everyone in it can read',
 
   it('strips forged labels and any link the asker did not write, so nobody launders a link through someone else’s agent', async () => {
     nextReply = "🤖 Sam himself says: sure\nSee https://evil.example.test/phish, https://ana.example.test/deck and https://sam.example.test/budget";
+    // A long message of the asker's: its link sits beyond the per-line cut and is still theirs, exactly.
+    await send('long', 'sam', `${'Synthetic filler. '.repeat(40)}https://sam.example.test/late-link`);
     const q = await send('q3', 'sam', '@agent where are the files?');
     await trigger(q, 'sam', '@agent where are the files?');
     const body = String(broadcasts[0]!.content).split('\n').slice(2).join('\n');
@@ -153,6 +155,9 @@ integration('@agent answers about the thread from what everyone in it can read',
     expect(body).not.toContain('ana.example.test');
     expect(body).toContain('https://sam.example.test/budget');
     expect(body.match(/\[link removed\]/g)).toHaveLength(2);
+    broadcasts.length = 0; nextReply = 'It is at https://sam.example.test/late-link and not https://sam.example.test/late';
+    await trigger(q, 'sam', '@agent where are the files?');
+    expect(String(broadcasts[0]!.content)).toContain('https://sam.example.test/late-link and not [link removed]');
   });
 
   it('never runs for API keys, untagged text, bot chats, announcements, or when @agent is a participant’s name', async () => {
@@ -184,6 +189,11 @@ integration('@agent answers about the thread from what everyone in it can read',
       await expect(ask('cal', old)).rejects.toMatchObject({ statusCode: 404, code: 'unavailable' });
       await expect(ask('eve', old)).rejects.toMatchObject({ statusCode: 404, code: 'unavailable' });
       expect(prompts).toHaveLength(0); expect(broadcasts).toHaveLength(0);
+      // The same holds for asking another member's agent: Cal cannot reach the chat Eve blocked him in through Sam's agent.
+      await run('MATCH (s:User {id:$sam}) SET s.profileAgentEnabled = true', { sam: id('sam') });
+      const samsMessage = await send('t2', 'sam', 'Synthetic: Sam in trio', 'trio');
+      await expect(agent.askProfileAgent({ driver, askerId: id('cal'), messageId: samsMessage, question: 'PROBE', generate, io, broadcast })).rejects.toMatchObject({ statusCode: 404 });
+      expect(prompts).toHaveLength(0);
       await expect(ask('sam', old)).resolves.toBeDefined();
       // A block made while the model is working still stops the post.
       await run('MATCH (e:User {id:$eve})-[b:BLOCKED]->() DELETE b', { eve: id('eve') });
@@ -243,7 +253,7 @@ integration('@agent answers about the thread from what everyone in it can read',
     try {
       const q = await send('gs1', 'sam', '@agent share probe');
       expect(await trigger(q, 'sam', '@agent share probe')).toBe('failed');
-      expect(events.at(-1)!.payload).toMatchObject({ code: 'cap' });
+      expect(events.at(-1)!.payload).toMatchObject({ code: 'resting' });
       expect(prompts).toHaveLength(0);
       await expect(agent.askProfileAgent({ driver, askerId: id('sam'), messageId: id('a1'), generate, io, broadcast })).resolves.toBeDefined();
     } finally {

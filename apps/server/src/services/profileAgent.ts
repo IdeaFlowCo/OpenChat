@@ -106,7 +106,9 @@ export async function loadShareableContext(
       coalesce(owner.profileAgentEnabled,false) AS enabled,
       owner.profileStatusText AS statusText, owner.profileStatusEmoji AS statusEmoji,
       asker.name AS askerName, coalesce(asker.isBot,false) AS askerIsBot,
-      EXISTS { MATCH (owner)-[:BLOCKED]-(asker) } AS blocked,
+      // Like an ordinary send: a block between the asker and anyone here (not only the owner) means nothing is posted.
+      EXISTS { MATCH (owner)-[:BLOCKED]-(asker) }
+        OR EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE other.id <> asker.id AND ((asker)-[:BLOCKED]->(other) OR (other)-[:BLOCKED]->(asker)) } AS blocked,
       m.content AS text, m.senderId AS senderId, sender.name AS senderName,
       coalesce(m.viaProfileAgent,false) OR coalesce(m.viaAutoResponse,false) OR coalesce(m.viaSecretary,false) AS automatic,
       head(collect(properties(card))) AS card
@@ -244,16 +246,25 @@ export function sanitizeAgentReply(
   let text = cleanText(raw).trim();
   // Never let the model forge the trusted label, the "Asked by" line or an official-sounding author line, quoted or not.
   text = text.split('\n').filter(line => !/🤖|open[\s-]*chat\s*(?:agent|security|support|team|staff)|automatic\s*reply|drafted\s+by|^\W*asked\s+by\b/i.test(line)).join('\n').trim();
-  // "[label](address)" would show only the label: break the syntax so every address is read as written.
-  text = text.replace(/\]\(/g, '] (');
+  // Cut before filtering, at a word boundary: a link shortened by the cut is judged as shortened, never kept as a different host.
+  text = clipReply(text);
   text = text.replace(LINK_CANDIDATE, link => allowed.has(normalizeLink(link)) ? link : '[link removed]');
+  // "[label](address)" would show only the label: break the syntax so every address is read as written.
+  // After the replacement too, so "[link removed]" can never become a label itself.
+  text = text.replace(/\]\(/g, '] (');
   const quoted = text.match(/^["“](.*)["”]$/s);
   if (quoted) text = quoted[1]!.trim();
   text = text.replace(/\n{3,}/g, '\n\n');
   // If hygiene removed everything, say the honest default.
   if (!text) text = fallback;
-  if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS - 1).trimEnd()}…`;
-  return text;
+  return clipReply(text);
+}
+function clipReply(text: string): string {
+  if (text.length <= MAX_REPLY_CHARS) return text;
+  const cut = text.slice(0, MAX_REPLY_CHARS - 1);
+  const space = cut.search(/\s\S*$/);
+  // Prefer the last word boundary when one is near; unbroken text is cut where it stands.
+  return `${(space > MAX_REPLY_CHARS - 200 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 export const agentLabel = (ownerName: string) => { const name = safeName(ownerName); return `🤖 ${name}'s OpenChat agent · not ${name}`; };
@@ -325,7 +336,8 @@ export async function reserveBudget(tx: ManagedTransaction, input: {
   const globalSpent = Number(row.get('globalSpent')?.toNumber?.() ?? row.get('globalSpent'));
   if (ownerSpent + input.micros > OWNER_MONTHLY_CAP_MICROS) throw new ProfileAgentError(429, 'cap', 'This agent has used its monthly allowance. Try again next month.');
   const share = typeof input.globalShare === 'number' && input.globalShare > 0 && input.globalShare < 1 ? input.globalShare : 1;
-  if (globalSpent + input.micros > globalMonthlyCapMicros() * share) throw new ProfileAgentError(503, 'cap', 'OpenChat agents are resting for the rest of this month.');
+  // 'resting', not 'cap': this is the service's ceiling, not this person's allowance.
+  if (globalSpent + input.micros > globalMonthlyCapMicros() * share) throw new ProfileAgentError(503, 'resting', 'OpenChat agents are resting for the rest of this month.');
   await tx.run(`
     MATCH (owner:User {id:$ownerId}), (g:ProfileAgentBudget {id:'global'})
     SET owner.profileAgentSpentMicros = CASE WHEN owner.profileAgentMonth = $month THEN coalesce(owner.profileAgentSpentMicros,0) ELSE 0 END + $micros,

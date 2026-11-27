@@ -14,6 +14,7 @@ export function threadAgentFailureText(code: string | undefined): string {
   if (code === 'cap') return 'Your agent has used its allowance for this month. Nothing was posted.';
   if (code === 'rate') return 'Your agent has answered a lot this hour. Try again later.';
   if (code === 'repeat') return 'Your agent already answered this message.';
+  if (code === 'resting') return 'OpenChat agents are resting for the rest of this month. Your message was sent.';
   if (code === 'unavailable') return 'OpenChat agents are not available right now. Your message was sent.';
   if (code === 'changed') return 'The chat changed before your agent could answer. Nothing was posted.';
   if (code === 'named') return 'Here @agent mentions a person, so your agent did not answer. Hold your message and choose Ask my agent.';
