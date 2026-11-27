@@ -1,4 +1,5 @@
 import React from 'react';
+vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-source-refresh' }));
 import { readFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   navigation: { navigate: vi.fn(), push: vi.fn(), setOptions: vi.fn(), addListener: vi.fn(() => () => {}) },
   focused: true,
   identityVerified: true,
+  ownerId: 'synthetic-owner',
   route: { params: {} as Record<string, unknown> },
   api: {
     removeChatSave: vi.fn(), dismissChatSuggestion: vi.fn(), getChatMemory: vi.fn(), saveChatMessage: vi.fn(), getImportedMessage: vi.fn(), listImportedChats: vi.fn(), getImportedChat: vi.fn(), listImportedMessages: vi.fn(), listImportedPeople: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation, useRoute: () => mocks.route, useFocusEffect: (callback: () => void) => React.useEffect(() => mocks.focused ? callback() : undefined, [callback]) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ isIdentityVerified: mocks.identityVerified }) }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ isIdentityVerified: mocks.identityVerified, currentUser: { userId: mocks.ownerId } }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: mocks.api }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
@@ -47,6 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.focused = true;
   mocks.identityVerified = true;
+  mocks.ownerId = 'synthetic-owner';
   mocks.api.listImportedChats.mockResolvedValue({ chats: [chat] });
   mocks.api.getImportedChat.mockResolvedValue(chat);
   mocks.api.listImportedMessages.mockResolvedValue({ nextCursor: null, messages: [
@@ -122,6 +125,16 @@ describe('imported chats front door', () => {
 
 describe('imported chat screen', () => {
   beforeEach(() => { mocks.route.params = { chatId: 'chat-1', title: 'Synthetic Garden Club' }; });
+
+  it('clears prior-owner content and navigation titles before a new account read completes', async () => {
+    await render(React.createElement(ImportedChatScreen));
+    expect(texts()).toContain('Hi all, I run a soil-health lab.');
+    mocks.api.getImportedChat.mockImplementation(() => new Promise(() => {}));
+    mocks.ownerId = 'different-owner';
+    await act(async () => root!.update(React.createElement(ImportedChatScreen)));
+    expect(texts()).not.toContain('Hi all, I run a soil-health lab.');
+    expect(mocks.navigation.setOptions).toHaveBeenLastCalledWith({ title: 'Imported chat' });
+  });
 
   it('reads as a private, read-only mirror with no way to send', async () => {
     await render(React.createElement(ImportedChatScreen));

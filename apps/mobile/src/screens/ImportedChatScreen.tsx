@@ -3,10 +3,12 @@
  * it and their asks. Read-only — there is no composer, and nothing here
  * reaches anyone in the chat. Chats › Imported chats › a chat.
  */
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, TextInput, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api, type ImportedAsk, type ImportedChatSummary, type ImportedMessage, type ImportedPerson, type ChatMemory } from '../api/client';
+import { useChat } from '../contexts/ChatContext';
+import { BeeperSourceStatus } from '../components/BeeperSourceStatus';
 import { Avatar } from '../components/Avatar';
 import { AskCard, participantName, ProvenanceStrip, useImportedRoles } from '../components/ImportedChatParts';
 import { Button, Card, Chip, ListRow } from '../components/ui';
@@ -18,20 +20,30 @@ export type ImportedChatTab = 'conversation' | 'people' | 'asks' | 'memory';
 const TABS: Array<{ id: ImportedChatTab; label: string }> = [{ id: 'conversation', label: 'Conversation' }, { id: 'people', label: 'People' }, { id: 'asks', label: 'Asks' }, { id: 'memory', label: 'Memory' }];
 
 export function ImportedChatScreen() {
+  const { currentUser, isIdentityVerified } = useChat();
+  const { params } = useRoute<RouteProps<'ImportedChat'>>();
+  const scope = isIdentityVerified && currentUser?.userId ? JSON.stringify([currentUser.userId, params.chatId, params.beeper?.connectionId, params.beeper?.chatKey, params.beeper?.jobId]) : undefined;
+  const active = useRef(scope); active.current = scope;
+  const r = useImportedRoles();
+  return scope ? <ImportedChatSession key={scope} isCurrent={() => active.current === scope} />
+    : <View style={[styles.center, { backgroundColor: r.canvas }]}><Text style={[type.body, { color: r.textMeta }]}>Verifying your account…</Text></View>;
+}
+function ImportedChatSession({ isCurrent }: { isCurrent: () => boolean }) {
   const navigation = useNavigation<NavProp<'ImportedChat'>>();
   const { params } = useRoute<RouteProps<'ImportedChat'>>();
   const r = useImportedRoles();
+  const guard = useRef(isCurrent); guard.current = isCurrent;
   const [tab, setTab] = useState<ImportedChatTab>(params.tab ?? 'conversation');
   const [chat, setChat] = useState<ImportedChatSummary | null>(null);
   const [error, setError] = useState(false);
 
-  useLayoutEffect(() => { navigation.setOptions({ title: chat?.title ?? params.title ?? 'Imported chat' }); }, [navigation, chat?.title, params.title]);
+  useLayoutEffect(() => { navigation.setOptions({ title: chat?.title ?? 'Imported chat' }); }, [navigation, chat?.title]);
   const loadChat = useCallback(async () => {
     setError(false);
-    try { setChat(await api.getImportedChat(params.chatId)); } catch { setError(true); }
+    try { const result = await api.getImportedChat(params.chatId); if (guard.current()) setChat(result); } catch { if (guard.current()) setError(true); }
   }, [params.chatId]);
   useEffect(() => { void loadChat(); }, [loadChat]);
-  const openPerson = useCallback((participantId: string) => navigation.navigate('ImportedPerson', { chatId: params.chatId, participantId }), [navigation, params.chatId]);
+  const openPerson = useCallback((participantId: string) => { if (guard.current()) navigation.navigate('ImportedPerson', { chatId: params.chatId, participantId }); }, [navigation, params.chatId]);
 
   if (error) return <View style={[styles.center, { backgroundColor: r.canvas }]}>
     <Text accessibilityRole="alert" style={[type.body, { color: r.danger }]}>Could not open this imported chat.</Text>
@@ -42,6 +54,7 @@ export function ImportedChatScreen() {
   return (
     <View style={[styles.root, { backgroundColor: r.canvas }]}>
       <ProvenanceStrip network={chat.network} coverage={chat.coverage} />
+      {params.beeper && <BeeperSourceStatus source={params.beeper} />}
       <View style={[styles.tabs, { borderBottomColor: r.line }]} accessibilityRole="tablist">
         {TABS.map(item => {
           // People counts everyone; Asks says which asks it counts (only open ones, not those needing review or closed).
