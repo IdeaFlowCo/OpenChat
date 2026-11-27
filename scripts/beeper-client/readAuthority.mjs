@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { opaqueBeeperNetworkKey, catalogueEntry, importBatch } from './desktopApi.mjs';
 import {
-  audience,
-  protocol,
+  readContract,
+  selectionNetwork,
   destination,
   isHex,
   openReadEnvelope,
