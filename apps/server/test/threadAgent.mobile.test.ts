@@ -71,6 +71,16 @@ it('an answer clears only its own message’s line, and progress shows even wher
   expect(texts()).toContain('Hold your message and choose Ask my agent');
 });
 
+it('attaches its listener again when the connection comes up after the chat opened', async () => {
+  const props = { conversationId: 'c', text: '', onInsert: vi.fn() };
+  await act(async () => { screen = create(React.createElement(ThreadAgentNotice, { ...props, connected: false })); });
+  mocks.handlers.clear(); // the socket that existed before connecting is gone
+  await act(async () => { screen.update(React.createElement(ThreadAgentNotice, { ...props, connected: true })); });
+  expect(mocks.handlers.has('agent-reply:status')).toBe(true);
+  await act(async () => { mocks.handlers.get('agent-reply:status')!({ conversationId: 'c', messageId: 'm', state: 'working' }); });
+  expect(texts()).toContain('Your agent is reading this chat');
+});
+
 it('“Ask my agent” explains what it reads, asks once as "mine" and never checks someone else’s opt-in', async () => {
   const answered = vi.fn();
   await act(async () => { screen = create(React.createElement(ProfileAgentAskControls, { messageId: 'm', name: 'Me', mine: true, onAnswered: answered })); });

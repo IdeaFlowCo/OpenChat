@@ -26,8 +26,10 @@ export function threadAgentFailureText(code: string | undefined): string {
  * says before sending who will see the answer, and afterwards shows that the
  * agent is working or why it did not answer. Only the sender sees this line.
  */
-export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = true }: {
+export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = true, connected = true }: {
   conversationId: string; text: string; onInsert: () => void;
+  /** Live connection state: the listener is attached again whenever the socket (re)connects. */
+  connected?: boolean;
   /** False while editing, or where @agent mentions a person: progress and refusals still show. */
   offerTag?: boolean;
 }) {
@@ -45,7 +47,8 @@ export function ThreadAgentNotice({ conversationId, text, onInsert, offerTag = t
     };
     socket?.on('agent-reply:status', onStatus);
     return () => { socket?.off('agent-reply:status', onStatus); };
-  }, [conversationId]);
+    // The socket may not exist yet when the chat opens, and is replaced on reconnect.
+  }, [conversationId, connected]);
   // A refusal clears itself; "working" clears itself too if the answer event is lost.
   useEffect(() => {
     if (!status) return;

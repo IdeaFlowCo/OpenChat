@@ -2472,7 +2472,7 @@ export function ChatScreen({
       )}
       {activeConversationLane === 'chat' && !!conversationId && <AutoResponseDraftNotice conversationId={conversationId} ready={isIdentityVerified} onReview={() => navigation.navigate('Secretary')} />}
       {/* @agent: your own agent answers in this chat (openchat-6zn). Not in bot or announcement chats, never while editing. */}
-      {myAgentAnswersHere && activeConversationLane === 'chat' && <ThreadAgentNotice conversationId={conversationId} text={text} offerTag={canTagAgent} onInsert={tagAgent} />}
+      {myAgentAnswersHere && activeConversationLane === 'chat' && <ThreadAgentNotice conversationId={conversationId} text={text} offerTag={canTagAgent} connected={isConnected} onInsert={tagAgent} />}
 
       {announcementReadOnly ? <View testID="announcements-read-only" style={{ padding: space[4], backgroundColor: c.surface, borderTopWidth: StyleSheet.hairlineWidth, borderColor: c.border }}>
         <Text style={[type.body, { color: c.textMetadata }]}>Only community admins can post announcements.</Text>
