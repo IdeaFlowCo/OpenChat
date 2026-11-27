@@ -42,13 +42,15 @@ module.exports = {
     // (oc8.2 / openchat-3jq.1). runtimeVersion=appVersion: an OTA update only
     // reaches installs whose native app version matches, so we never push JS
     // that's incompatible with the installed native runtime. checkAutomatically
-    // ON_LOAD: the app pulls a fresh bundle on launch. Native changes still
+    // ON_LOAD: check on launch, allowing up to 3s for a compatible update
+    // before falling back to cached/embedded JS. This native setting only
+    // takes effect in new binaries, not by publishing an OTA. Native changes still
     // require a new build (which bumps version -> new runtimeVersion).
     updates: {
       url: 'https://u.expo.dev/fc828863-4fa4-4b62-97f6-8c00ce1dffe3',
       enabled: true,
       checkAutomatically: 'ON_LOAD',
-      fallbackToCacheTimeout: 0,
+      fallbackToCacheTimeout: 3000,
     },
     runtimeVersion: { policy: 'appVersion' },
 
