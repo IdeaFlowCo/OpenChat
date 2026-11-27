@@ -231,6 +231,13 @@ export interface ImportCounts {
 }
 export interface ImportConflict { sourceMessageId: string; field: 'senderKey' | 'sentAt'; message: string }
 export interface ImportResult { dryRun: boolean; chatId: string | null; created: boolean; counts: ImportCounts; conflicts: ImportConflict[] }
+/** Internal relay authority, never accepted from a normal import request body.
+ * The relay holds owner/connection/job locks before invoking this transaction body. */
+export interface ImportTransactionOptions {
+  dryRun?: boolean;
+  importedBy: string;
+  relay?: { connectionId: string; epoch: number };
+}
 
 const rows = <T>(result: { records: Array<{ get(key: string): unknown }> }, key: string) => result.records.map(record => record.get(key) as T);
 const maxIso = (a: string | null, b: string | null) => !a ? b : !b ? a : (a > b ? a : b);
@@ -251,7 +258,7 @@ export async function importChat(ownerUserId: string, body: unknown, options: { 
 
 /** Internal shared transaction body. Caller parses before writes and owns the
  * owner/connection/job fences and commit; this never starts a nested session. */
-export async function importChatInTransaction(tx: ManagedTransaction, ownerUserId: string, payload: ImportPayload, options: {dryRun?: boolean; importedBy:string}): Promise<ImportResult> {
+export async function importChatInTransaction(tx: ManagedTransaction, ownerUserId: string, payload: ImportPayload, options: ImportTransactionOptions): Promise<ImportResult> {
   const dryRun=!!options.dryRun, importedBy=options.importedBy;
   const { source, coverage } = payload;
   const now = new Date().toISOString();
@@ -278,8 +285,18 @@ export async function importChatInTransaction(tx: ManagedTransaction, ownerUserI
   const created = !chatNode || Number(chatNode.importCount ?? 0) === 0;
   const before = created ? undefined : chatNode;
   const chatId = (chatNode?.id as string | undefined) ?? null;
+  // Provider-owned sources cannot be overwritten by a broad ordinary import.
+  // Explicit owner detachment/reconciliation is a separate operation.
+  const relay=options.relay;
+  if (chatNode?.relayConnectionId && !relay) fail(409,'Disconnect this chat from its Beeper source before importing over it.');
+  if (relay) {
+    if (!relay.connectionId || !Number.isSafeInteger(relay.epoch) || relay.epoch<1) fail(400,'Invalid source scan authority');
+    if (before && before.relayConnectionId !== relay.connectionId) fail(409,'Reconcile the existing import before attaching this source.');
+    if (Number(before?.relayScanEpoch ?? 0)>relay.epoch) fail(409,'This source scan has been superseded.');
+  }
   // Imports only move forward: a snapshot older than one already applied could roll back newer text, names and asks.
-  if (before?.asOf && coverage.asOf < (before.asOf as string)) {
+  // A relay uses a server-assigned scan epoch; Mac wall-clock values never order its scans.
+  if (!relay && before?.asOf && coverage.asOf < (before.asOf as string)) {
     fail(409, `A newer import of this chat (as of ${before.asOf as string}) is already saved. Send a snapshot as of that time or later.`, { currentAsOf: before.asOf });
   }
   const scoped = (part: string) => compositeKey(chatId ?? 'new', part);
@@ -480,7 +497,9 @@ export async function importChatInTransaction(tx: ManagedTransaction, ownerUserI
 
   await tx.run(
     `MATCH (c:OpenChatImportedChat {id: $chatId, ownerUserId: $ownerUserId})
-     SET c.chatType = $chatType, c.title = $title, c.asOf = CASE WHEN c.asOf IS NULL OR c.asOf < $asOf THEN $asOf ELSE c.asOf END,
+     SET c.chatType = $chatType, c.title = $title, c.asOf = CASE WHEN $relayConnectionId IS NOT NULL OR c.asOf IS NULL OR c.asOf < $asOf THEN $asOf ELSE c.asOf END,
+         c.relayConnectionId = CASE WHEN $relayConnectionId IS NULL THEN c.relayConnectionId ELSE $relayConnectionId END,
+         c.relayScanEpoch = CASE WHEN $relayConnectionId IS NULL THEN c.relayScanEpoch ELSE $relayScanEpoch END,
          c.method = $method, c.complete = $complete, c.note = $note,
          c.sourceRowTotal = CASE WHEN $rows IS NULL THEN c.sourceRowTotal ELSE $rows.total END,
          c.sourceRowText = CASE WHEN $rows IS NULL THEN c.sourceRowText ELSE $rows.text END,
@@ -490,7 +509,8 @@ export async function importChatInTransaction(tx: ManagedTransaction, ownerUserI
          c.importCount = coalesce(c.importCount, 0) + 1, c.lastImportAt = $now, c.lastImportedBy = $importedBy, c.updatedAt = $now
      REMOVE c.lockedAt`,
     {
-      ...base, chatType: source.chatType, title: source.title, asOf: coverage.asOf, method: coverage.method, complete: coverage.complete, note: coverage.note, importedBy, rows: coverage.sourceRowCounts ? { total: neo4j.int(coverage.sourceRowCounts.total), text: coverage.sourceRowCounts.text === null ? null : neo4j.int(coverage.sourceRowCounts.text), nonText: coverage.sourceRowCounts.nonText === null ? null : neo4j.int(coverage.sourceRowCounts.nonText) } : null,
+      ...base, relayConnectionId:relay?.connectionId ?? null,relayScanEpoch:relay?neo4j.int(relay.epoch):null,
+      chatType: source.chatType, title: source.title, asOf: coverage.asOf, method: coverage.method, complete: coverage.complete, note: coverage.note, importedBy, rows: coverage.sourceRowCounts ? { total: neo4j.int(coverage.sourceRowCounts.total), text: coverage.sourceRowCounts.text === null ? null : neo4j.int(coverage.sourceRowCounts.text), nonText: coverage.sourceRowCounts.nonText === null ? null : neo4j.int(coverage.sourceRowCounts.nonText) } : null,
       earliest: minIso(minIso((before?.earliestMessageAt as string | null) ?? null, coverage.earliestMessageAt), earliest),
       latest: maxIso(maxIso((before?.latestMessageAt as string | null) ?? null, coverage.latestMessageAt), latest),
     });

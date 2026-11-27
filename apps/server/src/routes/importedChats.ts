@@ -24,7 +24,8 @@ export const IMPORT_PATH = '/api/imported-chats/import';
  * so an anonymous request can never make the server buffer 16 MB.
  */
 export function exceptImportBody(parser: RequestHandler): RequestHandler {
-  return (req, res, next) => (req.method === 'PUT' && req.path === IMPORT_PATH ? next() : parser(req, res, next));
+  return (req, res, next) => ((req.method === 'PUT' && req.path === IMPORT_PATH)
+    || (req.method === 'POST' && req.path === '/api/beeper/relay/deliver') ? next() : parser(req, res, next));
 }
 
 const router = Router();
