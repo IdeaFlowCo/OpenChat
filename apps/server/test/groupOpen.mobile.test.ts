@@ -772,3 +772,22 @@ describe('Vision recovery in the actual message action handler',()=>{
     expect(mocks.uuid).not.toHaveBeenCalled();
   });
 });
+
+describe('community announcements composer', () => {
+  it.each([false, undefined])('hides message input without explicit posting permission (%s)', async canPost => {
+    mocks.chat.conversations[0] = { ...mocks.chat.conversations[0], communityKind: 'announcements', communityId: 'community-a', canPost };
+    await render();
+    expect(renderedText()).toContain('Only community admins can post announcements.');
+    expect(screen!.root.findAllByType('TextInput')).toHaveLength(0);
+    expect(screen!.root.findAllByProps({ accessibilityLabel: 'Attach image' })).toHaveLength(0);
+  });
+  it('keeps the normal composer for an admin and removes it when permission is revoked', async () => {
+    mocks.chat.conversations[0] = { ...mocks.chat.conversations[0], communityKind: 'announcements', communityId: 'community-a', canPost: true };
+    await render();
+    expect(screen!.root.findAllByType('TextInput')).toHaveLength(1);
+    mocks.chat.conversations = [{ ...mocks.chat.conversations[0], canPost: false }];
+    await render();
+    expect(screen!.root.findAllByType('TextInput')).toHaveLength(0);
+    expect(renderedText()).toContain('Only community admins can post announcements.');
+  });
+});

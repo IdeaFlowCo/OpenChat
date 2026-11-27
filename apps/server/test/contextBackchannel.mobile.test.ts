@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const chat = vi.hoisted(() => ({ conversations: [] as any[] }));
 const mocks = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), edit: vi.fn(), remove: vi.fn(), ask: vi.fn(), report: vi.fn() }));
 vi.mock('react-native', () => ({
   Platform: { select: () => ({}) }, StyleSheet: { create: (s: any) => s, hairlineWidth: 1 },
@@ -14,16 +15,16 @@ vi.mock('@react-navigation/native', () => ({ useFocusEffect: (fn: any) => React.
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 vi.mock('../../mobile/src/api/socket', () => ({ getSocket: () => null }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me' } }) }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me' }, conversations: chat.conversations }) }));
 vi.mock('../../mobile/src/services/clientLogger', () => ({ logError: vi.fn() }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: async () => ({ items: (await mocks.list()).posts.map((context: any) => ({ id: context.id, origin: 'context', context })) }), listContextPosts: mocks.list, createContextPost: mocks.create, updateContextPost: mocks.edit, deleteContextPost: mocks.remove, askContextAgents: mocks.ask, reportContextPost: mocks.report } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getConversationContent: async () => { const result = await mocks.list(); return { contextAvailable: result.contextAvailable, items: result.posts.map((context: any) => ({ id: context.id, origin: 'context', context })) }; }, listContextPosts: mocks.list, createContextPost: mocks.create, updateContextPost: mocks.edit, deleteContextPost: mocks.remove, askContextAgents: mocks.ask, reportContextPost: mocks.report } }));
 import { ContextLane, contextThreads } from '../../mobile/src/components/ContextLane';
 import { ContextComposer } from '../../mobile/src/components/ContextComposer';
 import { ContextLaneManager, contextLaneManager } from '../../mobile/src/services/contextLane';
 const post = (id: string, extra = {}) => ({ id, conversationId: 'room', text: id, authorId: 'me', author: { id: 'me', name: 'Jacob' }, kind: 'note', lane: 'context' as const, revision: 1, createdAt: '2026-10-07T00:00:00Z', updatedAt: '2026-10-07T00:00:00Z', clientRequestId: id, ...extra });
 const deferred = () => { let resolve!: (value: any) => void; const promise = new Promise<any>(r => { resolve = r; }); return { promise, resolve }; };
 let tree: ReactTestRenderer | undefined;
-beforeEach(() => { Object.values(mocks).forEach(m => m.mockReset()); mocks.list.mockResolvedValue({ posts: [] }); contextLaneManager.clearAll(); });
+beforeEach(() => { chat.conversations = []; Object.values(mocks).forEach(m => m.mockReset()); mocks.list.mockResolvedValue({ posts: [] }); contextLaneManager.clearAll(); });
 afterEach(async () => { if (tree) await act(async () => tree!.unmount()); tree = undefined; });
 const button = (label: string) => tree!.root.findAllByType('TouchableOpacity' as any).find(n => n.findAllByType('Text' as any).some(t => t.children.join('') === label))!;
 
@@ -105,4 +106,17 @@ it('keeps nested card actions accessible and reveals exact time on hover, focus 
   await act(async () => time().props.onPress());
   expect(JSON.stringify(tree!.toJSON())).toContain(exact);
   expect(button('More')).toBeDefined();
+});
+
+it('keeps announcement Stream read-only for members while retaining private entry capture', async () => {
+  chat.conversations = [{ id: 'room', communityKind: 'announcements', canPost: false }];
+  mocks.list.mockResolvedValue({ posts: [post('announcement', { authorId: 'another', kind: 'ask' })], contextAvailable: true });
+  await act(async () => { tree = create(React.createElement(ContextLane, { conversationId: 'room' })); });
+  expect(tree!.root.findAllByType(ContextComposer)).toHaveLength(0);
+  expect(JSON.stringify(tree!.toJSON())).toContain('Private entries are only for you');
+  expect(button('Private entry')).toBeDefined();
+  await act(async () => button('More').props.onPress());
+  expect(button('Reply')).toBeUndefined();
+  expect(button('Ask agents')).toBeUndefined();
+  expect(button('Report')).toBeDefined();
 });

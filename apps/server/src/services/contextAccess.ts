@@ -54,7 +54,7 @@ export async function acquireContextAclLocks(
  * expiry, or a scope change. Mutations call this after acquiring the ACL locks.
  */
 async function checkContextAccess(
-  tx: ManagedTransaction,
+  tx: Pick<ManagedTransaction,'run'>,
   userId: string,
   conversationId: string,
   scope: 'read' | 'write',
@@ -64,6 +64,8 @@ async function checkContextAccess(
   if (agentKeyId && !agentScopes?.includes(scope)) return false;
   const result = await tx.run(
     `MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
+     WITH u,c WHERE $scope <> 'write' OR coalesce(c.communityKind,'') <> 'announcements'
+       OR EXISTS { MATCH (u)-[cm:IN_OPENCHAT_COMMUNITY]->(:OpenChatCommunity {id:c.communityId}) WHERE cm.role IN ['owner','admin'] }
      ${agentKeyId ? `MATCH (k:AgentKey {id: $agentKeyId, ownerUserId: $userId})
      WHERE k.revokedAt IS NULL
        AND (k.expiresAt IS NULL OR k.expiresAt > $now)
@@ -75,14 +77,14 @@ async function checkContextAccess(
 }
 
 export async function checkContextReadAccess(
-  tx: ManagedTransaction, userId: string, conversationId: string,
+  tx: Pick<ManagedTransaction,'run'>, userId: string, conversationId: string,
   agentKeyId?: string, agentScopes?: string[]
 ): Promise<boolean> {
   return checkContextAccess(tx, userId, conversationId, 'read', agentKeyId, agentScopes);
 }
 
 export async function checkContextWriteAccess(
-  tx: ManagedTransaction, userId: string, conversationId: string,
+  tx: Pick<ManagedTransaction,'run'>, userId: string, conversationId: string,
   agentKeyId?: string, agentScopes?: string[]
 ): Promise<boolean> {
   return checkContextAccess(tx, userId, conversationId, 'write', agentKeyId, agentScopes);

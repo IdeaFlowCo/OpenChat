@@ -4,6 +4,8 @@ import { getDriver } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { acquireContextAclLocks } from '../services/contextAccess.js';
 import { publishConversationEvent } from '../services/conversationEvents.js';
+import {assertAnnouncementThoughtMutation} from '../services/announcementThoughtAccess.js';
+import {ContextLaneError} from '../services/contextLane.js';
 
 const router = Router();
 const statuses = new Set(['none', 'open', 'closed']);
@@ -103,7 +105,9 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
       // Clearing a status also withdraws the pin this action created.
       const visibility: MessageStatusVisibility = status === 'none' ? 'private'
         : (requestedVisibility as MessageStatusVisibility | undefined) ?? (wasShared ? 'chat' : 'private');
-      await acquireContextAclLocks(tx, { conversationId });
+      if (existing || visibility==='chat' || wasShared) {
+        await assertAnnouncementThoughtMutation(tx,userId,thoughtId,[{conversationId,requireWrite:visibility==='chat'||wasShared}]);
+      } else await acquireContextAclLocks(tx, { conversationId });
       // Recheck access after the ACL lock.
       const result = await tx.run(`
         MATCH (u:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
@@ -161,7 +165,10 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
       }
     }
     res.json({ messageId: id, thoughtId: saved.thoughtId, status: saved.status, visibility: saved.visibility });
-  } catch { res.status(500).json({ error: 'Could not save message status' }); }
+  } catch(error) {
+    if(error instanceof ContextLaneError){res.status(error.statusCode).json({error:error.message});return;}
+    res.status(500).json({ error: 'Could not save message status' });
+  }
   finally { await session.close(); }
 });
 export default router;

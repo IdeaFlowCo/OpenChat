@@ -1,4 +1,5 @@
 import type { ManagedTransaction } from 'neo4j-driver';
+import { assertCommunityPosting, CommunityError } from '../services/communities.js';
 import { publishConversationEvent } from '../services/conversationEvents.js';
 import { withConversationLock } from '../services/conversationLock.js';
 import { Server, Socket } from 'socket.io';
@@ -28,7 +29,7 @@ type MessageAuthorizationSession = {
   }>;
 };
 
-export type MessageSendAuthorization = 'allowed' | 'blocked' | 'not_participant';
+export type MessageSendAuthorization = 'allowed' | 'announcement' | 'blocked' | 'not_participant';
 
 /** Shared, directly testable authorization boundary for the primary socket send path. */
 export async function authorizeSocketMessageSend(
@@ -38,7 +39,7 @@ export async function authorizeSocketMessageSend(
 ): Promise<MessageSendAuthorization> {
   const check = await session.run(`
     MATCH (u:User {id: $userId})-[:PARTICIPATES_IN]->(c:Conversation {id: $conversationId})
-    RETURN exists {
+    RETURN c.communityKind AS communityKind, exists {
       MATCH (other:User)-[:PARTICIPATES_IN]->(c)
       WHERE other.id <> $userId
         AND ((other)-[:BLOCKED]->(u) OR (u)-[:BLOCKED]->(other))
@@ -46,7 +47,8 @@ export async function authorizeSocketMessageSend(
   `, { userId, conversationId });
 
   if (check.records.length === 0) return 'not_participant';
-  return check.records[0].get('blockedRelationship') === true ? 'blocked' : 'allowed';
+  if (check.records[0].get('blockedRelationship') === true) return 'blocked';
+  return check.records[0].get('communityKind') === 'announcements' ? 'announcement' : 'allowed';
 }
 
 // Track which sockets are in which conversations
@@ -239,7 +241,7 @@ export function setupChatSocket(io: Server): void {
         // --- Mention parsing (OpenChat-0jy), shared with the REST path ---
         const mentionedUserIds = await resolveMentionedUserIds(session, conversationId, userId, content);
 
-        const result = await session.run(`
+        const persist = (tx: Pick<ManagedTransaction,'run'>) => tx.run(`
           MATCH (c:Conversation {id: $conversationId})
           MATCH (sender:User {id: $senderId})
           MERGE (m:Message {id: $id})
@@ -295,6 +297,11 @@ export function setupChatSocket(io: Server): void {
           emojiSize: emojiSize.size,
           now
         });
+        const result = authorization === 'announcement' ? await withConversationLock(conversationId,async tx => {
+          if (await authorizeSocketMessageSend(tx,userId,conversationId) !== 'announcement') throw new Error('Conversation no longer available');
+          await assertCommunityPosting(tx,userId,conversationId);
+          return persist(tx);
+        },[userId]) : await persist(session);
 
         const message = convertToJS(result.records[0].get('message'));
         const participantIds = result.records[0].get('participantIds') as string[];
@@ -361,6 +368,7 @@ export function setupChatSocket(io: Server): void {
           console.warn('[push] fanout error:', err);
         });
       } catch (error) {
+        if (error instanceof CommunityError) { callback?.({error:error.message}); return; }
         console.error('Error sending message:', error);
         callback?.({ error: 'Failed to send message' });
       } finally {

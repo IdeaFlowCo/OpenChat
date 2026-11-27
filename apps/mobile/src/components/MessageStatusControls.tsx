@@ -22,7 +22,7 @@ const audiences = [
  * conversation the way Stream shares any item (a pin), so participants see a
  * chip on the message; "Only me" keeps it in the owner's Stream alone.
  */
-export function MessageStatusControls({ messageId, onSaved }: { messageId: string; onSaved?: () => void }) {
+export function MessageStatusControls({ messageId, announcementReadOnly=false, onSaved }: { messageId: string; announcementReadOnly?: boolean; onSaved?: () => void }) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const [status, setStatus] = useState<ThoughtStatus | null>(null);
@@ -33,6 +33,8 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
   const [saved, setSaved] = useState(false);
   const generation = useRef(0);
   const saving = useRef(false);
+  const readOnly = useRef(announcementReadOnly);readOnly.current=announcementReadOnly;
+  const sharedLocked=announcementReadOnly&&status!==null&&status!=='none'&&visibility==='chat';
 
   useEffect(() => {
     let current = true;
@@ -48,14 +50,15 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
         setStatus(value.status);
         // A message without a status starts shared with the chat; an existing
         // status keeps whatever its owner chose.
-        setVisibility(value.status === 'none' ? 'chat' : value.visibility ?? 'private');
+        setVisibility(value.status === 'none' ? (announcementReadOnly?'private':'chat') : value.visibility ?? 'private');
       })
       .catch(() => { if (current) setError('Could not load this message’s status.'); });
     return () => { current = false; generation.current++; };
-  }, [messageId, revision]);
+  }, [messageId, revision,announcementReadOnly]);
 
   const save = async (next: ThoughtStatus, nextVisibility: MessageStatusVisibility) => {
     if (saving.current || status === null) return;
+    if(readOnly.current&&(nextVisibility==='chat'||visibility==='chat'&&status!=='none'))return;
     const requestGeneration = generation.current;
     saving.current = true;
     setBusy(true);
@@ -82,13 +85,13 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
   };
 
   const chooseAudience = (next: MessageStatusVisibility) => {
-    if (busy || next === visibility) return;
+    if (busy || next === visibility || sharedLocked || (readOnly.current&&next==='chat')) return;
     setVisibility(next);
     // With no status yet, the choice applies to the next status you set.
     if (status && status !== 'none') void save(status, next);
   };
 
-  const audienceNote = visibility === 'chat'
+  const audienceNote = sharedLocked ? 'Only current community admins can change a shared announcement status.' : announcementReadOnly ? 'Your status stays private in your Stream.' : visibility === 'chat'
     ? 'Everyone in this chat sees the status on the message.'
     : 'Only you see it. It stays in your Stream.';
 
@@ -104,7 +107,7 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
         key={choice.value}
         label={`${status === choice.value ? '✓ ' : ''}${choice.label}`}
         variant={status === choice.value ? 'primary' : 'secondary'}
-        disabled={busy}
+        disabled={busy||sharedLocked}
         onPress={() => { void save(choice.value, visibility); }}
       />)}
       <Text style={{ ...type.label, color: c.textPrimary }}>Visible to</Text>
@@ -114,7 +117,7 @@ export function MessageStatusControls({ messageId, onSaved }: { messageId: strin
           label={audience.label}
           accessibilityRole="radio"
           selected={visibility === audience.value}
-          disabled={busy}
+          disabled={busy||sharedLocked||(announcementReadOnly&&audience.value==='chat')}
           onPress={() => chooseAudience(audience.value)}
         />)}
       </View>
