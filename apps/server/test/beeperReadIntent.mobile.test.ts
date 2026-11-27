@@ -25,3 +25,10 @@ it('rejects stale account/registry results at both asynchronous boundaries',asyn
  let finish!:(value:string)=>void;const local=grant({sealRead:()=>new Promise(resolve=>{finish=resolve;})});clear=installReviewedBeeperReadResolver(async()=>local);
  const sealed=authorizeBeeperRead(connection as any,job as any,chat as any,'owner');await Promise.resolve();await Promise.resolve();clear();finish(frame);await expect(sealed).rejects.toMatchObject({code:'beeper_secure_grant_required'});
 });
+
+it('requires the relay label to match the independently authenticated local network before sealing',async()=>{
+ const local=grant({display:{title:chat.title,chatType:chat.chatType,network:'imessage'}});clear=installReviewedBeeperReadResolver(async()=>local);
+ await expect(authorizeBeeperRead(connection as any,job as any,{...chat,network:'whatsapp'} as any,'owner')).rejects.toMatchObject({code:'beeper_secure_grant_required'});
+ expect(local.sealRead).not.toHaveBeenCalled();
+ expect(await authorizeBeeperRead(connection as any,job as any,{...chat,network:'imessage'} as any,'owner')).toBe(frame);
+});

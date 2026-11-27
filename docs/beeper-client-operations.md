@@ -3,8 +3,8 @@
 Source for review, not an activation claim. No service, launch agent, enrollment,
 account login or actual message read runs during installation or import. Source,
 independent security approval, compatible server/native delivery and actual owner
-acceptance are separate gates. This flow is **read-only**. Replies and optional
-Mac-local iMessage remain open product tasks.
+acceptance are separate gates. This flow is **read-only**. Replies remain a separate write capability. Optional iMessage read support uses
+the same GET-only flow, with its own explicitly selected Mac-local account.
 
 The paired native device must already hold a separately reviewed OpenChat machine
 pair. This capability uses the existing machine/device keys, but a *separate*
@@ -42,7 +42,7 @@ itself may have broader provider capabilities; the read adapter cannot send.
    node scripts/beeper-client/foreground.mjs catalogue --connection CONNECTION_ID
    ```
 
-   This shares WhatsApp chat titles, types and activity times with the approved
+   This shares the locally approved network's chat titles, types and activity times with the approved
    private OpenChat account. No source previews, raw chat/account IDs, participant
    roster, media URLs or message bodies go into this catalogue. Each run advances
    at most one bounded local page; it does not claim the full account is loaded.
@@ -96,3 +96,36 @@ revocation rejects later imports; existing private saved copies remain until
 explicitly deleted. A compromised destination server can access data deliberately
 disclosed into that account: device encryption protects Mac authority in transit,
 not plaintext already imported or a compromised trusted client/update.
+
+
+## Optional iMessage read account
+
+WhatsApp remains the default; setup never scans all networks or silently falls
+back to Messages. On macOS only, the owner may explicitly choose an **existing**
+iMessage account that Beeper Desktop already exposes through its local API:
+
+```sh
+node scripts/beeper-client/foreground.mjs setup --network imessage \
+  --pair-route PAIR_ROUTE --owner OPENCHAT_USER_ID --account LOCAL_IMESSAGE_ACCOUNT_ID \
+  --keychain-service DESIGNATED_SERVICE --keychain-account DESIGNATED_ACCOUNT
+```
+
+The separate local catalogue approval names iMessage. The catalogue excludes
+other networks and merged chats; the selected account/chat, authenticated network
+label and device/Mac scope remain fixed through reads and refreshes. Existing
+catalogue rows migrate to WhatsApp without changing keys or retained spool state.
+An iMessage grant cannot run on a non-macOS foreground worker. Native grant approval
+and read intent sealing reject a relay label that differs from the Mac-approved
+network. This does not enable iMessage sending or make claims about recipient
+phone-number privacy or encryption.
+
+Beeper's current documentation says iMessage is available on macOS. Actual local
+Beeper version, an existing iMessage account, API readiness and source permissions
+still need owner acceptance; GCP fixtures do not verify them. If Beeper requires
+Accessibility, Contacts or Messages-data permission for its own iMessage setup,
+the owner must approve that setup separately. This integration neither installs
+Beeper nor grants those permissions and never reads Messages SQLite or invokes
+AppleScript. No credentials or Mac databases are copied to GCP.
+
+References: [Beeper Desktop API](https://developers.beeper.com/desktop-api/) and
+[Beeper iMessage on macOS setup](https://help.beeper.com/en_US/chat-networks/new-imessage-on-macos-getting-started-guide).

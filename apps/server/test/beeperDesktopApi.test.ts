@@ -61,3 +61,13 @@ describe('Mac-local GET-only Beeper adapter',()=>{
     expect(()=>catalogueEntry({...chat,accountID:'foreign'},opts)).toThrow();
   });
 });
+
+it('maps only an explicitly selected network and refuses automatic merged routing',()=>{
+ const imessage={...chat,network:'iMessage'};
+ expect(()=>catalogueEntry(imessage,opts)).toThrow();
+ expect(()=>catalogueEntry(chat,{...opts,network:'imessage'})).toThrow();
+ expect(()=>catalogueEntry({...imessage,merge:{}},{...opts,network:'imessage'})).toThrow();
+ const batch=importBatch(imessage,{items:[message],hasMore:false},{...opts,network:'imessage'});
+ expect(parseImportPayload(batch.payload).source.network).toBe('imessage');
+ expect(batch.payload.source.accountKey).toBe(catalogueEntry(chat,opts).accountKey);
+});

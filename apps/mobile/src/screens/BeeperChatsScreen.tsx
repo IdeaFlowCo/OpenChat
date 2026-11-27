@@ -61,7 +61,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
     try {
       await acceptBeeperReadOffer(ownerId, grantText.trim(), scope => new Promise(resolve => {
         if (!valid()) { resolve(false); return; }
-        Alert.alert('Approve selected chat', `${scope.title} · ${scope.chatType}\nRead-only until ${stamp(new Date(scope.expiresAt).toISOString())}.\nSelected messages will be stored privately at https://chat.ideaflow.app. This does not send or share messages.`, [
+        Alert.alert('Approve selected chat', `${scope.title} · ${scope.network==='imessage'?'iMessage':'WhatsApp'} · ${scope.chatType}\nRead-only until ${stamp(new Date(scope.expiresAt).toISOString())}.\nSelected messages will be stored privately at https://chat.ideaflow.app. This does not send or share messages.`, [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Approve chat grant', onPress: () => resolve(valid()) },
         ], { cancelable: true, onDismiss: () => resolve(false) });
@@ -108,7 +108,7 @@ function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:st
   const active = connections?.find(item => item.id === selected);
   return <Page>
     <View style={styles.heading}><Text accessibilityRole="header" style={[type.heading, { color: r.text }]}>Beeper chats</Text><Chip label="Read-only" /></View>
-    <Note>Read selected WhatsApp chats through your Mac, then explore their Conversation, People, Asks and Memory privately in OpenChat. Replies require a separate write grant; iMessage is not enabled.</Note>
+    <Note>Read selected chats through your Mac, then explore their Conversation, People, Asks and Memory privately in OpenChat. WhatsApp is the default. iMessage requires a separate Mac-local account approval. Replies require their own write grant in Beeper replies.</Note>
     <View style={styles.actions}><Button label="Set up Mac connection" onPress={() => setShowSetup(value => !value)} /><Button label="Reload connections" variant="ghost" onPress={() => { void load(); }} /></View>
     {!!error && <Note error>{error}</Note>}
     {showSetup && <Card style={styles.form}>
@@ -173,7 +173,7 @@ function Catalogue({ connection, guard, open }: { connection: BeeperReadConnecti
     {!entries && !error && <ActivityIndicator color={r.accent} accessibilityLabel="Loading source catalogue" />}
     {entries?.length === 0 && <Note>{search ? 'No matching chats in the reported catalogue.' : 'Waiting for your Mac to report its catalogue. Approving this connection does not start the Mac adapter.'}</Note>}
     {entries?.map(entry => <Card key={entry.chatKey} padding="none"><ListRow title={entry.title}
-      subtitle={`${entry.chatType === 'group' ? 'Group' : 'Direct chat'} · Catalogue read ${stamp(entry.sourceReadAt)}${entry.importedChatId ? ' · saved copy available' : ''}`}
+      subtitle={`${entry.network==='imessage'?'iMessage':'WhatsApp'} · ${entry.chatType === 'group' ? 'Group' : 'Direct chat'} · Catalogue read ${stamp(entry.sourceReadAt)}${entry.importedChatId ? ' · saved copy available' : ''}`}
       onPress={() => { if (mounted.current && guard()()) open(entry.chatKey); }} /></Card>)}
     {!!cursor && <><Note>{`${entries?.length ?? 0} reported chats loaded. More are available.`}</Note><Button label="Load more source chats" loading={loading} onPress={() => { void load(cursor); }} /></>}
   </>;

@@ -100,22 +100,23 @@ afterEach(() => {
   registry.close();
   rmSync(dir, { force: true, recursive: true });
 });
-async function fixture() {
+async function fixture(network = 'whatsapp') {
   const options = {
     pairRoute,
     ownerId: 'owner',
     accountId: chat.accountID,
+    network,
     destination,
     expiresAt: now + 3600000,
   };
   const { publicOffer, relayToken } = await authority.approveCatalogue(options, async () => true);
-  const { grantId, wire } = await authority.approveChat(publicOffer.connectionId, chat, async () => true);
+  const { grantId, wire } = await authority.approveChat(publicOffer.connectionId, { ...chat, network }, async () => true);
   const pins = { deviceKey: device.publicKey, machineKey: machine.publicKey };
   const selection = (openReadEnvelope(pins, 'grant', wire, device.secretKey) as any).scope;
   await acceptBeeperReadOffer('owner', wire, async (scope) => scope.chatKey === selection.chatKey);
   stop = enableBeeperReadRegistry('owner');
   const conn = { ...publicOffer, id: publicOffer.connectionId, state: 'active' };
-  const entry = { chatKey: selection.chatKey, title: 'Selected', chatType: 'group' };
+  const entry = { chatKey: selection.chatKey, title: 'Selected', chatType: 'group', network };
   const issue = async (kind = 'open', epoch = 1) => {
     const job = {
       id: id(),
@@ -362,4 +363,59 @@ it('abandons only the exact staged read, refuses replay and admits a fresh expli
  await authority.read(ticket,a.api);expect(authority.nextPending(ticket)).not.toBeNull();
  authority.abandon(ticket);expect(()=>authority.nextPending(ticket)).toThrow();expect(()=>authority.prepare(claim)).toThrow();
  const next=authority.prepare(await f.issue('refresh',2));await authority.read(next,a.api);expect(a.send).toHaveBeenCalledTimes(2);
+});
+
+it('requires explicit Mac-only iMessage consent and keeps WhatsApp as the legacy default', async () => {
+  authority.close();
+  authority = new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now,platform:'linux'});
+  const confirm = vi.fn(async () => true);
+  await expect(authority.approveCatalogue({pairRoute,ownerId:'owner',accountId:chat.accountID,destination,expiresAt:now+60000,network:'imessage'},confirm)).rejects.toThrow();
+  expect(confirm).not.toHaveBeenCalled();
+  authority.close();
+  // Platform injection exercises policy on GCP; this is not a macOS integration claim.
+  authority = new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now,platform:'darwin'});
+  const f = await fixture('imessage');
+  const grant:any = openReadEnvelope(f.pins,'grant',f.wire,device.secretKey);
+  expect(grant.display.network).toBe('imessage');
+  await expect(authority.approveChat(f.publicOffer.connectionId,chat,async()=>true)).rejects.toThrow();
+  await expect(authority.approveChat(f.publicOffer.connectionId,{...chat,network:'imessage',merge:{}},async()=>true)).rejects.toThrow();
+  const a=adapter(),ticket=authority.prepare(await f.issue());
+  await authority.read(ticket,a.api);
+  const batch=authority.beforeDisclosure(ticket,0,saved=>saved);
+  expect(batch.payload.source.network).toBe('imessage');
+  expect(a.send).toHaveBeenCalledTimes(1);
+  authority.close();
+  authority = new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now,platform:'linux'});
+  await expect(authority.readCatalogue(f.publicOffer.connectionId,a.api,async()=>{})).rejects.toThrow();
+  expect(a.send).toHaveBeenCalledTimes(1);
+});
+it('limits a catalogue to its locally approved network and rejects merged or foreign source selections', async () => {
+  authority.close();
+  authority = new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now,platform:'darwin'});
+  const f=await fixture('imessage');
+  const source=createBeeperReadonlyClient({readToken:async()=>'synthetic',fetchImpl:async()=>Response.json({items:[chat,{...chat,id:'local-imessage',network:'iMessage'},{...chat,id:'merged-imessage',network:'iMessage',merge:{}}],hasMore:false})});
+  const published:any[]=[];
+  await authority.readCatalogue(f.publicOffer.connectionId,source,async(body,beforeFetch)=>beforeFetch(()=>{published.push(body);}));
+  expect(published).toHaveLength(1);
+  expect(published[0].items).toHaveLength(1);
+  expect(published[0].items[0].network).toBe('imessage');
+  expect(JSON.stringify(published)).not.toContain('local-imessage');
+  await expect(authority.approveChat(f.publicOffer.connectionId,{...chat,network:'imessage',accountID:'foreign'},async()=>true)).rejects.toThrow();
+});
+it('adds the network column to a legacy private catalogue without changing keys, cursor or staged batches', async () => {
+  const f=await fixture(),ticket=authority.prepare(await f.issue()),a=adapter();
+  await authority.read(ticket,a.api);
+  const original=authority.nextPending(ticket);
+  authority.close();
+  const db=new DatabaseSync(join(state,'beeper-read.db'));
+  const before=db.prepare('SELECT accountKey,grantId,cursor FROM catalogues').get();
+  db.exec('ALTER TABLE catalogues DROP COLUMN network');
+  db.close();
+  authority = new BeeperReadAuthority({directory:state,pairingDirectory:paired,clock:()=>now});
+  const reopened=new DatabaseSync(join(state,'beeper-read.db'));
+  expect(reopened.prepare('SELECT accountKey,grantId,cursor FROM catalogues').get()).toEqual(before);
+  expect(reopened.prepare('SELECT network FROM catalogues').get()).toEqual({network:'whatsapp'});
+  reopened.close();
+  expect(authority.nextPending(ticket)).toEqual(original);
+  expect(a.send).toHaveBeenCalledTimes(1);
 });

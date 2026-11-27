@@ -22,14 +22,15 @@ const field = (account: string, route: string, chat: string) => {
   if (!/^[A-Za-z0-9_-]{1,120}$/.test(account) || !isHex(route, 48) || !isHex(chat, 64)) return unavailable();
   return 'beeper.read.v1.' + account + '.' + route + '.' + chat;
 };
-type Display = { title: string; chatType: 'direct' | 'group' };
+type Display = { title: string; chatType: 'direct' | 'group'; network?:'whatsapp'|'imessage' };
 function validDisplay(display: Display | undefined): display is Display {
   return (
     !!display &&
     typeof display.title === 'string' &&
     !!display.title.trim() &&
     display.title.length <= 200 &&
-    ['direct', 'group'].includes(display.chatType)
+    ['direct', 'group'].includes(display.chatType) &&
+    (display.network === undefined || ['whatsapp','imessage'].includes(display.network))
   );
 }
 type Entry = {

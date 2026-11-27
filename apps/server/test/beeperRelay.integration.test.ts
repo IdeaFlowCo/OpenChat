@@ -137,6 +137,29 @@ integration('Beeper relay is a private transactional importer, not machine autho
     expect((await relayPost('deliver',batch(payload('Revoked upload')))).status).toBe(401);
     const rows=await run(`MATCH(m:OpenChatImportedMessage {ownerUserId:$uid}) RETURN collect(m.text) AS texts`,{uid});expect(rows.records[0]!.get('texts')).not.toContain('Revoked upload');
   });
+  it('keeps optional iMessage catalogue and history in the same private transactional reader',async()=>{
+    const route='a'.repeat(48),localToken='ocbr_'+randomBytes(32).toString('base64url'),selected='b'.repeat(64);
+    const localOffer={...offer,connectionId:route,relayTokenHash:createHash('sha256').update(localToken).digest('hex')};
+    localOffer.relayBinding=service.beeperRelayBinding(localToken,localOffer as any);
+    expect((await ownerPost('/api/beeper/connections',{offer:localOffer})).status).toBe(201);
+    const relay=(action:string,body:unknown)=>request(app).post('/api/beeper/relay/'+action).set('Authorization','Bearer '+localToken).send(body);
+    const entry={accountKey,chatKey:selected,network:'imessage',chatType:'direct',title:'Synthetic iMessage',capturedAt:new Date().toISOString(),lastActivityAt:null};
+    expect((await relay('catalogue',{items:[entry],complete:false})).status).toBe(200);
+    const p='/api/beeper/connections/'+route;
+    expect((await request(app).get(p+'/chats').set('Authorization',auth())).body.items[0]).toMatchObject({network:'imessage',chatKey:selected});
+    expect((await request(app).get(p+'/chats').set('Authorization',auth(other))).status).toBe(404);
+    const read=await ownerPost(p+'/reads',{chatKey:selected,clientRequestId:'imessage',kind:'open'});expect(read.status).toBe(201);
+    expect((await request(app).put(p+'/reads/'+read.body.id+'/intent').set('Authorization',auth()).send({frame:Buffer.alloc(48,7).toString('base64')})).status).toBe(200);
+    const claimed=await relay('claim',{});expect(claimed.body.job.id).toBe(read.body.id);
+    const value=payload();value.source={...value.source,network:'imessage',chatKey:selected,chatType:'direct'};
+    const body={jobId:read.body.id,leaseId:claimed.body.job.leaseId,sequence:0,final:true,payload:value,digest:service.beeperPayloadDigest({payload:value,final:true})};
+    const imported=await relay('deliver',body);expect(imported.status).toBe(200);
+    expect((await relay('deliver',body)).body.duplicate).toBe(true);
+    const rows=await run('MATCH(c:OpenChatImportedChat {ownerUserId:$uid,id:$id}) RETURN c.network AS network',{uid,id:imported.body.chatId});
+    expect(rows.records[0]!.get('network')).toBe('imessage');
+    expect((await request(app).delete(p).set('Authorization',auth())).status).toBe(200);
+    expect((await relay('deliver',body)).status).toBe(401);
+  });
   it('account deletion removes all new transport records in the owner fence and never affects another owner',async()=>{
     const imported=await import('../src/services/importedChatAccount.js');const s=driver.session();
     try{await s.executeWrite(async tx=>{await imported.deleteImportedChatsForUser(tx,uid);await service.deleteBeeperReadTransport(tx,uid);await tx.run(`MATCH(u:User {id:$uid}) DETACH DELETE u`,{uid});});}finally{await s.close();}

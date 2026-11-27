@@ -116,7 +116,8 @@ const readFields = [
   .join(',');
 export class BeeperReadAuthority {
   #db;
-  constructor({ directory, pairingDirectory, clock = Date.now }) {
+  #platform;
+  constructor({ directory, pairingDirectory, clock = Date.now, platform = process.platform }) {
     privatePath(pairingDirectory, true);
     const paired = join(pairingDirectory, 'authority.db');
     privatePath(paired, false);
@@ -132,6 +133,7 @@ export class BeeperReadAuthority {
     }
     privatePath(file, false);
     this.clock = clock;
+    this.#platform = platform;
     this.#db = new DatabaseSync(file);
     this.#db.exec('PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;');
     this.#db.prepare('ATTACH DATABASE ? AS paired').run(paired);
@@ -142,6 +144,8 @@ export class BeeperReadAuthority {
       CREATE TABLE IF NOT EXISTS operations(job TEXT PRIMARY KEY,grantId TEXT NOT NULL,request TEXT UNIQUE NOT NULL,hash TEXT NOT NULL,kind TEXT NOT NULL,until INTEGER NOT NULL,phase TEXT NOT NULL,cursor TEXT,direction TEXT NOT NULL,oldest TEXT,newest TEXT,chatId TEXT);
       CREATE UNIQUE INDEX IF NOT EXISTS one_pending_read ON operations(grantId) WHERE phase IN ('reserved','reading','staged');
       CREATE TABLE IF NOT EXISTS batches(job TEXT NOT NULL,sequence INTEGER NOT NULL,payload TEXT,digest TEXT NOT NULL,final INTEGER NOT NULL,confirmed INTEGER NOT NULL DEFAULT 0,attempted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(job,sequence));`);
+    if (!this.#db.prepare('PRAGMA table_info(catalogues)').all().some(column => column.name === 'network'))
+      this.#db.exec("ALTER TABLE catalogues ADD COLUMN network TEXT NOT NULL DEFAULT 'whatsapp'");
     this.#db.prepare('INSERT OR IGNORE INTO identity VALUES(1,?)').run(randomBytes(32));
   }
   close() {
@@ -173,7 +177,7 @@ export class BeeperReadAuthority {
     const c = this.#db
       .prepare('SELECT * FROM catalogues WHERE route=? AND revoked=0 AND expires>?')
       .get(route, this.clock());
-    if (!c) reject();
+    if (!c || !['whatsapp','imessage'].includes(c.network) || (c.network==='imessage' && this.#platform!=='darwin')) reject();
     const p = this.#pairing(c.pairRoute);
     if (p.machineKey !== c.machine || p.deviceKey !== c.device || c.expires > p.expires) reject();
     return { c, p };
@@ -182,12 +186,14 @@ export class BeeperReadAuthority {
     return this.#db.prepare('SELECT key FROM identity WHERE id=1').get().key;
   }
   async approveCatalogue(
-    { pairRoute, ownerId, accountId, expiresAt, destination: target },
+    { pairRoute, ownerId, accountId, expiresAt, destination: target, network = 'whatsapp' },
     confirm = confirmBeeperLocally,
   ) {
     const p = this.#pairing(pairRoute);
     if (
       target !== destination ||
+      !['whatsapp','imessage'].includes(network) ||
+      (network === 'imessage' && this.#platform !== 'darwin') ||
       typeof ownerId !== 'string' ||
       !validId(accountId) ||
       !isHex(pairRoute, 48) ||
@@ -202,11 +208,12 @@ export class BeeperReadAuthority {
       authority: 'beeper.catalogue.read',
       ownerId,
       accountId,
+      network,
       target,
       deviceKey: p.deviceKey,
       machineKey: p.machineKey,
       expiresAt,
-      disclosure: 'WhatsApp chat titles, types and activity times',
+      disclosure: `${network === 'imessage' ? 'iMessage' : 'WhatsApp'} chat titles, types and activity times`,
     };
     if ((await confirm(Object.freeze(consent))) !== true) reject();
     const route = id(),
@@ -223,7 +230,7 @@ export class BeeperReadAuthority {
         reject();
       this.#db
         .prepare(
-          'INSERT INTO catalogues(route,owner,pairRoute,device,machine,accountId,accountKey,grantId,expires) VALUES(?,?,?,?,?,?,?,?,?)',
+          'INSERT INTO catalogues(route,owner,pairRoute,device,machine,accountId,accountKey,grantId,expires,network) VALUES(?,?,?,?,?,?,?,?,?,?)',
         )
         .run(
           route,
@@ -235,6 +242,7 @@ export class BeeperReadAuthority {
           accountKey,
           catalogueGrantId,
           expiresAt,
+          network,
         );
       const expiry = new Date(expiresAt).toISOString();
       const relayBinding = createHmac('sha256', relayToken)
@@ -292,9 +300,9 @@ export class BeeperReadAuthority {
     if (!called) reject();
     if (page.hasMore && (!validId(page.oldestCursor) || c.cursor === page.oldestCursor)) reject();
     const capturedAt = new Date(this.clock()).toISOString();
-    const mapping = { identityKey: this.#identity(), accountId: c.accountId, capturedAt };
+    const mapping = { identityKey: this.#identity(), accountId: c.accountId, capturedAt, network:c.network };
     const items = page.items
-      .filter((v) => String(v.network).toLowerCase() === 'whatsapp')
+      .filter((v) => String(v.network).toLowerCase() === c.network && v.merge == null)
       .map((v) => catalogueEntry(v, mapping));
     for (let i = 0; i < items.length; i += 200) {
       let dispatched = false;
@@ -331,6 +339,7 @@ export class BeeperReadAuthority {
     };
   }
   async approveChat(route, chatMetadata, confirm = confirmBeeperLocally) {
+    if (chatMetadata.merge != null) reject();
     const { c } = this.#connection(route);
     const chat = {
       id: chatMetadata.id,
@@ -342,6 +351,7 @@ export class BeeperReadAuthority {
     const entry = catalogueEntry(chat, {
       identityKey: this.#identity(),
       accountId: c.accountId,
+      network: c.network,
       capturedAt: new Date(this.clock()).toISOString(),
     });
     const grantId = id(),
@@ -353,6 +363,7 @@ export class BeeperReadAuthority {
           accountId: c.accountId,
           chatId: chat.id,
           title: entry.title,
+          network: entry.network,
           disclosure: 'selected chat messages and participant attribution',
         }),
       )) !== true
@@ -368,7 +379,7 @@ export class BeeperReadAuthority {
         wire: sealReadEnvelope(
           p,
           'grant',
-          { scope, display: { title: entry.title, chatType: entry.chatType } },
+          { scope, display: { title: entry.title, chatType: entry.chatType, network: entry.network } },
           p.secret,
           randomBytes,
         ),
@@ -517,6 +528,7 @@ export class BeeperReadAuthority {
     const payloads = chunks(chat, page, {
       identityKey: this.#identity(),
       accountId: c.accountId,
+      network: c.network,
       capturedAt: new Date(this.clock()).toISOString(),
     });
     return this.#tx(() => {

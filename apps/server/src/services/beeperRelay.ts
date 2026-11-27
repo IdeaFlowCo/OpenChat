@@ -141,10 +141,10 @@ export async function publishBeeperCatalogue(token:string,body:unknown){
   if(!Array.isArray(items)||items.length>200||typeof v.complete!=='boolean')fail(400,'invalid_catalogue');
   const entries=(items as unknown[]).map(raw=>{
     const r=object(raw),capturedAt=typeof r.capturedAt==='string'&&Number.isFinite(Date.parse(r.capturedAt))?new Date(r.capturedAt).toISOString():fail(400,'invalid_catalogue');
-    if(!hex(r.chatKey,64)||!hex(r.accountKey,64)||r.network!=='whatsapp'||!['direct','group'].includes(r.chatType as string)||!bounded(r.title,200))fail(400,'invalid_catalogue');
+    if(!hex(r.chatKey,64)||!hex(r.accountKey,64)||!['whatsapp','imessage'].includes(r.network as string)||!['direct','group'].includes(r.chatType as string)||!bounded(r.title,200))fail(400,'invalid_catalogue');
     const lastActivityAt=r.lastActivityAt===null?null:typeof r.lastActivityAt==='string'&&Number.isFinite(Date.parse(r.lastActivityAt))?new Date(r.lastActivityAt).toISOString():fail(400,'invalid_catalogue');
     // Whitelist, never persist previews/rosters/source IDs/URLs from a payload.
-    return {chatKey:r.chatKey as string,accountKey:r.accountKey as string,network:'whatsapp',chatType:r.chatType as string,title:r.title as string,capturedAt,lastActivityAt};
+    return {chatKey:r.chatKey as string,accountKey:r.accountKey as string,network:r.network as string,chatType:r.chatType as string,title:r.title as string,capturedAt,lastActivityAt};
   });
   return relay(token,async(tx,c)=>{
     if(entries.some(e=>e.accountKey!==c.accountKey))fail(403,'source_scope_mismatch');
@@ -166,7 +166,7 @@ export async function listBeeperCatalogue(ownerUserId:string,connectionId:string
     const r=await tx.run(`MATCH(e:OpenChatBeeperCatalogue {connectionId:$connectionId,ownerUserId:$ownerUserId})
       WHERE ($cursor='' OR e.chatKey>$cursor) AND ($search='' OR toLower(e.title) CONTAINS toLower($search)) AND ($chatKey='' OR e.chatKey=$chatKey)
       OPTIONAL MATCH(chat:OpenChatImportedChat {ownerUserId:$ownerUserId,relayConnectionId:$connectionId,chatKey:e.chatKey})
-      RETURN e{.chatKey,.title,.chatType,.lastActivityAt,.sourceReadAt,.receivedAt,importedChatId:chat.id} AS entry ORDER BY e.chatKey LIMIT 201`,{ownerUserId,connectionId,cursor,search,chatKey});
+      RETURN e{.chatKey,.title,.chatType,.network,.lastActivityAt,.sourceReadAt,.receivedAt,importedChatId:chat.id} AS entry ORDER BY e.chatKey LIMIT 201`,{ownerUserId,connectionId,cursor,search,chatKey});
     const items=r.records.slice(0,200).map(row=>row.get('entry'));
     return {connection:{id:c.id,state:c.state,expiresAt:c.expiresAt},items,nextCursor:r.records.length>200?items.at(-1).chatKey:null};
   });
@@ -250,7 +250,7 @@ export async function resumeBeeperRead(token:string,body:unknown){
 export async function deliverBeeperRead(token:string,body:unknown){
   const v=object(body),payload=parseImportPayload(v.payload);
   if(!hex(v.jobId,48)||!hex(v.leaseId,48)||!hex(v.digest,64)||!Number.isSafeInteger(v.sequence)||number(v.sequence)<0||typeof v.final!=='boolean')fail(400,'invalid_batch');
-  if(payload.messages.length>100||Buffer.byteLength(JSON.stringify(v),'utf8')>1024*1024||payload.coverage.complete||payload.source.network!=='whatsapp')fail(400,'invalid_batch');
+  if(payload.messages.length>100||Buffer.byteLength(JSON.stringify(v),'utf8')>1024*1024||payload.coverage.complete||!['whatsapp','imessage'].includes(payload.source.network))fail(400,'invalid_batch');
   const digest=beeperPayloadDigest({payload:v.payload,final:v.final});if(digest!==v.digest)fail(409,'batch_digest_mismatch');
   return relay(token,async(tx,c)=>{
     const r=await tx.run(`MATCH(j:OpenChatBeeperJob {id:$jobId,ownerUserId:$ownerUserId,connectionId:$connectionId})

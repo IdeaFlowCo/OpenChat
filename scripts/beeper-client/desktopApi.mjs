@@ -83,12 +83,12 @@ export function createBeeperReadonlyClient({readToken,port=23373,fetchImpl=fetch
 /** Catalogue excludes source IDs, previews, participants, avatars, unread flags
  * and asset URLs before anything leaves the Mac. @param {Record<string,any>} chat
  */
-export function catalogueEntry(chat,{identityKey,accountId,capturedAt}){
-  if(chat.accountID!==accountId||String(chat.network).toLowerCase()!=='whatsapp')bad();
+export function catalogueEntry(chat,{identityKey,accountId,capturedAt,network='whatsapp'}){
+  if(!['whatsapp','imessage'].includes(network)||chat.accountID!==accountId||String(chat.network).toLowerCase()!==network||chat.merge!=null)bad();
   if(!['group','single','direct'].includes(chat.type))bad();
   const readAt=date(capturedAt);if(!readAt)bad();
   return {accountKey:opaqueBeeperKey(identityKey,'account',identifier(accountId)),
-    chatKey:opaqueBeeperKey(identityKey,'chat',accountId,identifier(chat.id)),network:'whatsapp',
+    chatKey:opaqueBeeperKey(identityKey,'chat',accountId,identifier(chat.id)),network,
     title:text(chat.title,200,true),chatType:chat.type==='group'?'group':'direct',
     lastActivityAt:date(chat.lastActivity),capturedAt:readAt};
 }
@@ -97,8 +97,8 @@ export function catalogueEntry(chat,{identityKey,accountId,capturedAt}){
  * No asks or private Memory are generated, and absence never means deletion.
  * @param {Record<string,any>} chat @param {Page} input
  */
-export function importBatch(chat,input,{identityKey,accountId,capturedAt,selfUserId}){
-  const catalogue=catalogueEntry(chat,{identityKey,accountId,capturedAt});page(input);
+export function importBatch(chat,input,{identityKey,accountId,capturedAt,selfUserId,network='whatsapp'}){
+  const catalogue=catalogueEntry(chat,{identityKey,accountId,capturedAt,network});page(input);
   if(input.items.length>100)bad();
   const participantMap=new Map(),messages=[];let unsupported=0;
   for(const m of input.items){
@@ -116,7 +116,7 @@ export function importBatch(chat,input,{identityKey,accountId,capturedAt,selfUse
       mediaType:m.isDeleted===true?null:hasMedia?'attachment':null,editedAt,replyToSourceMessageId:null});
   }
   const times=messages.map(m=>m.sentAt).sort();
-  const payload={schemaVersion:1,source:{network:'whatsapp',accountKey:catalogue.accountKey,chatKey:catalogue.chatKey,chatType:catalogue.chatType,title:catalogue.title},
+  const payload={schemaVersion:1,source:{network:catalogue.network,accountKey:catalogue.accountKey,chatKey:catalogue.chatKey,chatType:catalogue.chatType,title:catalogue.title},
     coverage:{asOf:catalogue.capturedAt,method:'beeper-desktop-api-readonly',earliestMessageAt:times[0]??null,latestMessageAt:times.at(-1)??null,complete:false,
       note:`Partial Beeper API page; ${unsupported} unsupported control events omitted. Network history completeness is unknown.`},
     participants:[...participantMap.values()],messages,asks:[]};

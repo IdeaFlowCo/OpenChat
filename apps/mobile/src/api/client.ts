@@ -1059,7 +1059,7 @@ export interface BeeperReadConnection {
   state: string; heartbeatAt?: string | null; lastSuccessAt?: string | null; lastError?: string | null;
 }
 export interface BeeperCatalogueEntry {
-  chatKey: string; title: string; chatType: 'direct' | 'group'; lastActivityAt?: string | null;
+  chatKey: string; title: string; chatType: 'direct' | 'group'; network?:'whatsapp'|'imessage'; lastActivityAt?: string | null;
   sourceReadAt?: string | null; receivedAt?: string | null; importedChatId?: string | null;
 }
 export interface BeeperReadJob {
