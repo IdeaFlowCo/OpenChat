@@ -57,7 +57,10 @@ Hold a message in the canonical client to open its actions.
     **$2 per month** cap from actual token usage (worst case reserved first), plus a global
     monthly ceiling (`OPENCHAT_PROFILE_AGENT_GLOBAL_MONTHLY_USD`, default 50). Rate
     limits: 10 asks per asker per hour, 5 per asker and owner, 40 per owner, and 2 per
-    message. Human sessions only (agent keys and connectors are refused).
+    message. Human sessions only (agent keys and connectors are refused). Like an ordinary
+    send, nothing is posted while the asker, or the owner the answer is stored under, and
+    anyone in the chat have blocked each other. Auto-reply drafts, which only the owner
+    sees, need only the owner and the sender not to have blocked each other.
   - **Model and key:** the existing `ANTHROPIC_API_KEY` and `ASSISTANT_MODEL`
     (default `claude-haiku-4-5`). `OPENCHAT_PROFILE_AGENT_ENABLED=false` is the kill switch.
 - **@agent / Ask my agent** (openchat-6zn): *your own* built-in agent answers
