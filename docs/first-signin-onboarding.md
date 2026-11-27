@@ -31,3 +31,11 @@ Tests cover normal and compact completion, delayed storage checks, returning dev
 OTA owner's workspace: `/home/dev/code/openchat-stream-design-fix-20261125/onboarding-evidence/`, report `REPORT-native-builds.md`, with `build-list.json`, `update-list-50.json`, `channel-production.json`, `appstore-lookup.txt` and observation time. No credentials are copied into this repository.
 
 SDK 54 documentation: https://github.com/expo/expo/blob/sdk-54/docs/pages/versions/v54.0.0/sdk/updates.mdx (the requested versioned docs site currently redirects to the latest SDK).
+
+## Cold-start behavior in the next native build
+
+This change also sets `updates.fallbackToCacheTimeout` to **3000 ms**, keeping `checkAutomatically: 'ON_LOAD'`. When a new native binary includes this configuration, Expo can wait up to three seconds on cold start for a compatible update instead of immediately launching cached/embedded JS. If an update is ready within that window, it can run on that launch. Slow or offline launches still fall back to available local JS; there is no guarantee that the newest update will finish in time. The existing update banner offers an explicit restart after a later background download, preserving in-progress sign-in and user work.
+
+This is **native build configuration**, not an OTA-only change. Already-installed 1.0.20 binaries retain their zero-wait startup behavior, even if they receive the JavaScript completion fix. Already-installed App Store 1.0.6 binaries cannot receive the current 1.0.20 OTAs. The next approved store build embeds the current onboarding gate and completion fix, so the onboarding gate and completion logic are available immediately without downloading an OTA; it also embeds the three-second update window for future compatible OTAs. The release owner must choose the native version/runtime and publish compatible updates for that runtime. This PR deliberately does not bump the version, build, submit, or publish.
+
+Native Expo config introspection verifies the generated iOS `EXUpdatesLaunchWaitMs` and Android `expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS` values. This confirms configuration generation on Linux, not actual iOS launch timing or App Store acceptance; those remain device/release checks.
