@@ -1464,6 +1464,7 @@ export const api = {
     request<Message>(`/api/chat/messages/${messageId}`, {
       method: 'PATCH',
       body: JSON.stringify({ content }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -1471,7 +1472,7 @@ export const api = {
    * DELETE /api/chat/messages/:id
    */
   deleteMessage: (messageId: string) =>
-    request<Message>(`/api/chat/messages/${messageId}`, { method: 'DELETE' }),
+    request<Message>(`/api/chat/messages/${messageId}`, { method: 'DELETE', expireAuthOnForbidden: false }),
 
   // ── Reactions (OpenChat-7bd) ─────────────────────────────────────────────────
 
@@ -1483,6 +1484,7 @@ export const api = {
     request<{ reactions: ReactionSummary[] }>(`/api/chat/messages/${messageId}/reactions`, {
       method: 'POST',
       body: JSON.stringify({ emoji }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -1492,7 +1494,7 @@ export const api = {
   removeReaction: (messageId: string, emoji: string) =>
     request<{ reactions: ReactionSummary[] }>(
       `/api/chat/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', expireAuthOnForbidden: false }
     ),
 
   // ── Read receipts (OpenChat-0nj) ────────────────────────────────────────
@@ -1557,7 +1559,6 @@ export const api = {
     }>('/api/auth/me', {
       method: 'PATCH',
       body: JSON.stringify(fields),
-      expireAuthOnForbidden: false,
     }),
 
   // ── Personal Secretary (OpenChat-3kr.3.1) ───────────────────────────────
@@ -1876,6 +1877,7 @@ export const api = {
     request<Message>(`/api/chat/messages/${messageId}/forward`, {
       method: 'POST',
       body: JSON.stringify({ toConversationId }),
+      expireAuthOnForbidden: false,
     }),
 
   /**
@@ -2016,6 +2018,7 @@ export const api = {
     request<Thought>(`/api/thoughts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(fields),
+      expireAuthOnForbidden: false,
     }),
 
   /** Delete a thought (204 response → returns void). */

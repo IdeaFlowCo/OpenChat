@@ -96,6 +96,50 @@ integration('community review regressions: shared mutations and account lifecycl
       }
     }
   });
+  it('takes the author User fence before the announcement while account deletion holds that User',async()=>{
+    const f=await fixture('automatic-lock');
+    const source=await post(`/api/chat/conversations/${f.co.announcementsId}/messages`,{content:'Automatic synthetic source'},f.member);expect(source.status).toBe(201);
+    const {prepareCommunityAccountDeletion}=await import('../src/services/communities.js');
+    const {postAutomaticMessage}=await import('../src/services/profileAgent.js');
+    let entered!:(value:'user'|'conversation')=>void,observed=false,conversationLocked=false;
+    const first=new Promise<'user'|'conversation'>(resolve=>{entered=resolve;});
+    const instrumented={session:()=>{const child=driver.session();return {close:()=>child.close(),executeWrite:(fn:any)=>child.executeWrite(async actual=>fn({run:async(q:string,p:any)=>{
+      const userFence=q.includes('SET u.contextAclRevision'),chatFence=q.includes('SET c.contextAclRevision');
+      if(!observed&&(userFence||chatFence)){observed=true;entered(userFence?'user':'conversation');}
+      const result=await actual.run(q,p);if(chatFence)conversationLocked=true;return result;
+    }}))};}} as unknown as Driver;
+    const s=driver.session(),tx=s.beginTransaction();let automatic:ReturnType<typeof postAutomaticMessage>|undefined;
+    try{
+      await tx.run(`MATCH(u:User {id:$id}) SET u.contextAclRevision=coalesce(u.contextAclRevision,0)+1`,{id:f.member});
+      automatic=postAutomaticMessage(instrumented,{ownerId:f.member,conversationId:f.co.announcementsId,replyToId:source.body.id,content:'Automatic synthetic reply',props:{},idempotencyKey:prefix+'-automatic'});
+      expect(await first).toBe('user');await new Promise(resolve=>setTimeout(resolve,75));expect(conversationLocked).toBe(false);
+      await prepareCommunityAccountDeletion(tx,f.member);await tx.rollback();expect(await automatic).not.toBeNull();
+    }finally{await tx.close();await Promise.allSettled(automatic?[automatic]:[]);await s.close();}
+  });
+  it('settles a real managed account deletion concurrent with automatic posting and redacts any earlier committed reply',async()=>{
+    const f=await fixture('automatic-delete'),source=await post(`/api/chat/conversations/${f.co.announcementsId}/messages`,{content:'Source before deletion'},f.owner);expect(source.status).toBe(201);
+    const {postAutomaticMessage}=await import('../src/services/profileAgent.js');
+    const [deleted]=await Promise.all([
+      request(app).delete('/api/auth/me').set('Authorization',auth(f.owner)),
+      postAutomaticMessage(driver,{ownerId:f.owner,conversationId:f.co.announcementsId,replyToId:source.body.id,content:'Must not outlive account deletion',props:{},idempotencyKey:prefix+'-delete-auto'}),
+    ]);
+    expect(deleted.status).toBe(204);
+    const remaining=await run(`OPTIONAL MATCH(u:User {id:$owner}) WITH count(u) AS users OPTIONAL MATCH(m:Message {senderId:$owner}) RETURN users,collect(m.content) AS content`,{owner:f.owner});
+    expect(Number(remaining.records[0]!.get('users'))).toBe(0);expect(remaining.records[0]!.get('content')).not.toContain('Must not outlive account deletion');
+    const detail=await request(app).get('/api/communities/'+f.co.id).set('Authorization',auth(f.member));expect(detail.body).toMatchObject({role:'owner',state:'active'});
+  });
+  it('does not invert account-deletion locks in the internal assistant announcement writer',async()=>{
+    const f=await fixture('assistant-lock');
+    const {prepareCommunityAccountDeletion}=await import('../src/services/communities.js');
+    const {persistMessage}=await import('../src/services/assistant.js');
+    const s=driver.session(),tx=s.beginTransaction();let automatic:ReturnType<typeof persistMessage>|undefined;
+    try{
+      await tx.run(`MATCH(u:User {id:$id}) SET u.contextAclRevision=coalesce(u.contextAclRevision,0)+1`,{id:f.member});
+      let finished=false;automatic=persistMessage(undefined,f.member,f.co.announcementsId,'Synthetic internal announcement').then(value=>{finished=true;return value;});
+      await new Promise(resolve=>setTimeout(resolve,75));expect(finished).toBe(false);
+      await prepareCommunityAccountDeletion(tx,f.member);await tx.rollback();expect(await automatic).not.toBeNull();
+    }finally{await tx.close();await Promise.allSettled(automatic?[automatic]:[]);await s.close();}
+  });
   it('serializes ownership transfer with owner account deletion without leaving an active ownerless community',async()=>{
     const f=await fixture('owner-race');
     expect((await post('/api/communities/join',{token:f.token},f.outsider)).status).toBe(200);

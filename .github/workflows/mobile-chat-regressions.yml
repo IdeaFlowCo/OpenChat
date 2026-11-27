@@ -51,7 +51,7 @@ jobs:
           test/profileAgent.unit.test.ts test/profileAgent.route.test.ts test/profileAgent.mobile.test.ts
       - name: Community access, account transitions and explicit group joins
         working-directory: apps/server
-        run: npx vitest run test/communities.mobile.test.ts test/contextBackchannel.mobile.test.ts test/communityRefresh.mobile.test.ts test/streamLinks.mobile.test.ts
+        run: npx vitest run test/communities.mobile.test.ts test/contextBackchannel.mobile.test.ts test/communityRefresh.mobile.test.ts test/streamLinks.mobile.test.ts test/communityMutationAuth.mobile.test.ts
       - name: Saved People pagination, virtualization, account isolation, and private cards
         working-directory: apps/server
         run: >-

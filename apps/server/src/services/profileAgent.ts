@@ -402,6 +402,10 @@ export async function postAutomaticMessage(driver: Driver, input: {
   try {
     const now = new Date().toISOString();
     const result = await session.executeWrite(async tx => {
+      // Community account deletion/role changes take User before Conversation.
+      // Kind is immutable; a metadata read preserves normal delivery's old lock order.
+      const kind=await tx.run(`MATCH(c:Conversation {id:$id}) RETURN c.communityKind AS kind`,{id:input.conversationId});
+      if(kind.records[0]?.get('kind')==='announcements')await acquireContextAclLocks(tx,{userIds:[input.ownerId]});
       await acquireContextAclLocks(tx, { conversationId: input.conversationId });
       return tx.run(`
         MATCH (owner:User {id:$ownerId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId})
