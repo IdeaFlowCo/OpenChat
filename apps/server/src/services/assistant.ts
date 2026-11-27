@@ -28,7 +28,8 @@ import { unlinkedProvisionConfigured } from './unlinkedProvision.js';
 import type { Server as IOServer } from 'socket.io';
 import type AnthropicType from '@anthropic-ai/sdk';
 import { nanoid } from 'nanoid';
-import neo4j from 'neo4j-driver';
+import neo4j, {type ManagedTransaction} from 'neo4j-driver';
+import {acquireContextAclLocks} from './contextAccess.js';
 import { getDriver } from '../db.js';
 import { legacyEmailProjection } from '../privacy/legacyEmailCompat.js';
 import { broadcastMessageToParticipants } from '../websocket/chatHandler.js';
@@ -185,16 +186,10 @@ export async function persistMessage(
 
   const s = getDriver().session();
   try {
-    const result = await s.run(
+    const persist = (tx:Pick<ManagedTransaction,'run'>) => tx.run(
       `
       MATCH (c:Conversation {id: $conversationId})
       MATCH (sender:User {id: $senderId})
-      // Only announcement writers participate in community role/leave locking.
-      // Ordinary match-card delivery keeps its existing lock order.
-      FOREACH (_ IN CASE WHEN c.communityKind='announcements' THEN [1] ELSE [] END |
-        SET sender.contextAclRevision=coalesce(sender.contextAclRevision,0)+1)
-      FOREACH (_ IN CASE WHEN c.communityKind='announcements' THEN [1] ELSE [] END |
-        SET c.contextAclRevision=coalesce(c.contextAclRevision,0)+1)
       WITH c,sender
       WHERE coalesce(c.communityKind,'') <> 'announcements' OR EXISTS {
         MATCH (sender)-[:PARTICIPATES_IN]->(c)
@@ -246,6 +241,14 @@ export async function persistMessage(
         creationToken,
       }
     );
+    // A conditional FOREACH in the write query does not establish admission
+    // order reliably. Announcements explicitly lock User then Conversation in
+    // one retryable transaction; ordinary match delivery keeps its prior order.
+    const kind=await s.run(`MATCH(c:Conversation {id:$id}) RETURN c.communityKind AS kind`,{id:conversationId});
+    const result=kind.records[0]?.get('kind')==='announcements' ? await s.executeWrite(async tx=>{
+      await acquireContextAclLocks(tx,{userIds:[senderId],conversationId});
+      return persist(tx);
+    }) : await persist(s);
 
     if (result.records.length === 0) return null;
     const message = toJS(result.records[0].get('message')) as Record<string, unknown>;
