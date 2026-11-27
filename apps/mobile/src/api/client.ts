@@ -1052,6 +1052,25 @@ export interface CatchUpPerson { userId: string; name: string; avatarUrl: string
 export type PrivateLinkTarget = { kind: 'user'; id: string } | { kind: PrivateThingKind; id?: string; name?: string };
 // Imported chat mirrors (OpenChat-061g): the owner's private, read-only copies of chats from other networks.
 export interface ImportedCoverage { asOf: string | null; method: string | null; earliestMessageAt: string | null; latestMessageAt: string | null; complete: boolean; note: string | null; sourceRowCounts?: { total: number; text: number | null; nonText: number | null } | null; lastImportAt: string | null; importCount: number }
+export type BeeperReadKind = 'open' | 'refresh' | 'earlier';
+export interface BeeperReadConnection {
+  id: string; accountKey: string; machineKey: string; deviceKey: string; expiresAt: string;
+  state: string; heartbeatAt?: string | null; lastSuccessAt?: string | null; lastError?: string | null;
+}
+export interface BeeperCatalogueEntry {
+  chatKey: string; title: string; chatType: 'direct' | 'group'; lastActivityAt?: string | null;
+  sourceReadAt?: string | null; receivedAt?: string | null; importedChatId?: string | null;
+}
+export interface BeeperReadJob {
+  id: string; epoch: number; state: 'pending' | 'leased' | 'done' | 'failed' | 'cancelled';
+  nextSequence: number; kind: BeeperReadKind; chatId?: string | null; createdAt?: string;
+  lastBatchAt?: string | null; completedAt?: string | null; lastError?: string | null;
+}
+export interface BeeperPublicOffer {
+  protocol: 'openchat.beeper.read.v1'; destination: 'https://chat.ideaflow.app'; connectionId: string;
+  machineKey: string; deviceKey: string; accountKey: string; catalogueGrantId: string; relayTokenHash: string; relayBinding: string; ownerUserId: string; expiresAt: string;
+}
+
 export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: ImportedCoverage; counts: { messages: number; participants: number; openAsks: number } }
 export interface ImportedParticipantRef { participantId: string; label: string; displayName: string | null; isOwner: boolean }
 export interface ImportedPerson extends ImportedParticipantRef { nameSource: 'contact' | 'push_name' | 'profile' | 'self_stated' | 'owner' | 'unknown'; membership?: 'current' | 'former' | 'unknown'; messageCount: number; firstMessageAt: string | null; lastMessageAt: string | null; factCount: number; askCount: number }
@@ -1830,6 +1849,19 @@ export const api = {
   listCatchUp: () => request<{ due: CatchUpPerson[] }>('/api/private/due'),
 
   // Imported chats — read-only; nothing here sends, invites or notifies anyone.
+  listBeeperConnections: () => request<BeeperReadConnection[]>('/api/beeper/connections', { expireAuthOnForbidden: false }),
+  approveBeeperConnection: (offer: BeeperPublicOffer) => request<Pick<BeeperReadConnection, 'id' | 'state' | 'accountKey' | 'expiresAt'>>('/api/beeper/connections', { method: 'POST', body: JSON.stringify({ offer }), expireAuthOnForbidden: false }),
+  revokeBeeperConnection: (id: string) => request<{ ok: true }>(`/api/beeper/connections/${encodeURIComponent(id)}`, { method: 'DELETE', expireAuthOnForbidden: false }),
+  getBeeperCatalogue: (id: string, options: { search?: string; cursor?: string; chatKey?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (options.search) query.set('search', options.search);
+    if (options.cursor) query.set('cursor', options.cursor);
+    if (options.chatKey) query.set('chatKey', options.chatKey);
+    return request<{ connection: Pick<BeeperReadConnection, 'id' | 'state' | 'expiresAt'>; items: BeeperCatalogueEntry[]; nextCursor?: string | null }>(`/api/beeper/connections/${encodeURIComponent(id)}/chats${query.toString() ? `?${query}` : ''}`, { expireAuthOnForbidden: false });
+  },
+  requestBeeperRead: (id: string, input: { chatKey: string; clientRequestId: string; kind: BeeperReadKind }) => request<BeeperReadJob>(`/api/beeper/connections/${encodeURIComponent(id)}/reads`, { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  attachBeeperReadIntent: (id: string, jobId: string, frame: string) => request<{ ok: true }>(`/api/beeper/connections/${encodeURIComponent(id)}/reads/${encodeURIComponent(jobId)}/intent`, { method: 'PUT', body: JSON.stringify({ frame }), expireAuthOnForbidden: false }),
+  getBeeperReadJob: (id: string, jobId: string) => request<BeeperReadJob>(`/api/beeper/connections/${encodeURIComponent(id)}/reads/${encodeURIComponent(jobId)}`, { expireAuthOnForbidden: false }),
   listImportedChats: () => request<{ chats: ImportedChatSummary[] }>('/api/imported-chats'),
   getImportedChat: (chatId: string) => request<ImportedChatSummary>(importedChatPath(chatId)),
   removeChatSave: (chatId: string, sourceMessageId: string) => request<{removed: boolean}>(`${importedChatPath(chatId)}/memory/saved/${encodeURIComponent(sourceMessageId)}`, {method: 'DELETE'}),

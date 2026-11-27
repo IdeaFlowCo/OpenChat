@@ -34,6 +34,7 @@ import { AppIcon } from '../components/AppIcon';
 import { Chip, ListRow } from '../components/ui';
 import { formatListTime, onlinePresence } from '../utils/listTime';
 import { AgentOverlayButton } from '../components/AgentOverlayButton';
+import { BeeperChatsLink } from '../components/BeeperChatsLink';
 import { ImportedChatsLink } from '../components/ImportedChatsLink';
 import { HeaderBarButton } from '../components/HeaderBarButton';
 import { ConnectionStatusLine } from '../components/ConnectionStatusLine';
@@ -289,6 +290,7 @@ export function ConversationsScreen() {
             />
           )}
           {!isUnlinkedEmbed() && <ListRow icon="people" title="Communities" onPress={() => navigation.navigate('Communities')} style={[styles.peopleRow, { borderBottomColor: c.divider }]} />}
+          {!isUnlinkedEmbed() && <BeeperChatsLink />}
           {!isUnlinkedEmbed() && <ImportedChatsLink />}
           <StoriesStrip
             onCreate={() => navigation.navigate('StoryComposer')}

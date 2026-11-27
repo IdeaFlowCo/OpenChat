@@ -58,6 +58,7 @@ import { CardEntryScreen } from './src/screens/CardEntryScreen';
 import { FriendsScreen } from './src/screens/FriendsScreen';
 import { PrivateThingScreen } from './src/screens/PrivateThingScreen';
 import { CatchUpScreen } from './src/screens/CatchUpScreen';
+import { BeeperChatsScreen, BeeperReadScreen } from './src/screens/BeeperChatsScreen';
 import { ImportedChatsScreen } from './src/screens/ImportedChatsScreen';
 import { ImportedChatScreen } from './src/screens/ImportedChatScreen';
 import { ImportedPersonScreen } from './src/screens/ImportedPersonScreen';
@@ -281,8 +282,10 @@ function ChatsNavigator({ c }: { c: ReturnType<typeof getColors> }) {
       <ChatsStack.Screen name="PrivateThing" component={PrivateThingScreen} options={{ title: 'Private notes' }} />
       <ChatsStack.Screen name="CatchUp" component={CatchUpScreen} options={{ title: 'Catch up' }} />
       {/* Imported chat mirrors (OpenChat-061g): private, read-only */}
+      <ChatsStack.Screen name="BeeperChats" component={BeeperChatsScreen} options={{ title: 'Beeper chats' }} />
+      <ChatsStack.Screen name="BeeperRead" component={BeeperReadScreen} options={{ title: 'Read from Beeper' }} />
       <ChatsStack.Screen name="ImportedChats" component={ImportedChatsScreen} options={{ title: 'Imported chats' }} />
-      <ChatsStack.Screen name="ImportedChat" component={ImportedChatScreen} options={({ route }) => ({ title: route.params.title ?? 'Imported chat' })} />
+      <ChatsStack.Screen name="ImportedChat" component={ImportedChatScreen} options={{ title: 'Imported chat' }} />
       <ChatsStack.Screen name="ImportedPerson" component={ImportedPersonScreen} options={{ title: 'Person' }} />
       {/* Agent API keys (OpenChat-7c9) */}
       <ChatsStack.Screen
