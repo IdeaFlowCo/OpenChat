@@ -1,19 +1,28 @@
 // Registration requires a direct OpenChat principal. The route commits to its owner, expiry,
 // and two independent endpoint credentials. The relay stores only their hashes.
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
+import { isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 import type { Server, Socket } from 'socket.io';
 import { validateToken } from '../middleware/auth.js';
-import { TRUSTED_PROXY_SETTING } from '../services/securityEvent.js';
+import { securityEvent } from '../services/securityEvent.js';
+import type { ProxyTrust } from '../services/nginxProxyTrust.js';
 
-const proxyAddr = createRequire(import.meta.url)('proxy-addr') as {
-  (req: IncomingMessage, trust: (addr: string) => boolean): string;
-  compile(ranges: string[]): (addr: string) => boolean;
-};
-const trust = proxyAddr.compile(TRUSTED_PROXY_SETTING.split(',').map((s) => s.trim()));
-export function relayClientAddress(req: IncomingMessage) {
-  return proxyAddr(req, trust);
+/** Only one concrete, operator-bound nginx peer may supply the nearest forwarded hop.
+ * With no pin, record only the transport peer. Addresses never allocate relay capacity.
+ */
+export function relayAddressReader(trusted: ProxyTrust) {
+  return (req: IncomingMessage): string => {
+    const peer = req.socket.remoteAddress;
+    if (!peer || !isIP(peer)) return 'unknown';
+    if (!trusted(peer, 0)) return peer;
+    // nginx must overwrite XFF with its verified client, or append its own observed
+    // peer on the right. Never walk through a second, client-selected proxy.
+    const forwarded = req.headers['x-forwarded-for'];
+    if (typeof forwarded !== 'string') return peer;
+    const address = forwarded.slice(forwarded.lastIndexOf(',') + 1).trim();
+    return isIP(address) && !address.includes('%') ? address : peer;
+  };
 }
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const key = (s: unknown): s is string => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s);
@@ -23,12 +32,13 @@ interface Registration {
   expires: number;
   machineHash: string;
   deviceHash: string;
-  address: string;
   seen: number;
   machine?: Socket;
   device?: Socket;
 }
-export function attachMachineRelay(io: Server, idleMs = 120_000) {
+export function attachMachineRelay(io: Server, idleMs = 120_000, trusted: ProxyTrust = () => false) {
+  const readAddress = relayAddressReader(trusted);
+  let nextDenialLog = 0;
   const routes = new Map<string, Registration>();
   const relay = io.of('/machine-agent-v2');
   function drop(route: string, g: Registration) {
@@ -47,7 +57,14 @@ export function attachMachineRelay(io: Server, idleMs = 120_000) {
     const a = socket.handshake.auth ?? {},
       { route, ticket } = a;
     const side: unknown = a.side;
-    const deny = () => next(new Error('Relay admission unavailable'));
+    const deny = () => {
+      const now = Date.now();
+      if (now >= nextDenialLog) {
+        nextDenialLog = now + 5_000;
+        securityEvent('machine_relay_admission', 'denied', { ip: readAddress(socket.request) });
+      }
+      return next(new Error('Relay admission unavailable'));
+    };
     if (
       typeof route !== 'string' ||
       !/^[a-f0-9]{48}$/.test(route) ||
@@ -80,21 +97,15 @@ export function attachMachineRelay(io: Server, idleMs = 120_000) {
       )
         return deny();
       if (!g) {
-        const address = relayClientAddress(socket.request);
         if (routes.size >= 2000) return deny();
-        let fromAddress = 0,
-          fromUser = 0;
-        for (const row of routes.values()) {
-          if (row.address === address) fromAddress++;
-          if (row.owner === user.userId) fromUser++;
-        }
-        if (fromAddress >= 32 || fromUser >= 8) return deny();
+        let fromUser = 0;
+        for (const row of routes.values()) if (row.owner === user.userId) fromUser++;
+        if (fromUser >= 8) return deny();
         g = {
           owner: user.userId,
           expires: a.expires,
           machineHash: a.machineHash,
           deviceHash: ticketHash,
-          address,
           seen: now,
         };
         routes.set(route, g);

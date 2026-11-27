@@ -15,14 +15,6 @@
 import { createHash } from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 
-/**
- * Express `trust proxy`: only our own private hops. openchat_app is reached
- * from noos_nginx (Docker network / docker0 gateway) or loopback, so req.ip is
- * the address nginx saw and a client-supplied X-Forwarded-For from an
- * untrusted peer cannot choose its own logged address.
- */
-export const TRUSTED_PROXY_SETTING = 'loopback, linklocal, uniquelocal';
-
 export type SecurityOutcome = 'success' | 'failure' | 'denied';
 
 export interface SecurityEventFields {
