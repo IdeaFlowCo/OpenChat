@@ -1,9 +1,23 @@
+vi.mock('../../mobile/src/screens/BeeperChatsScreen', () => ({ BeeperChatsScreen: () => null, BeeperReadScreen: () => null }));
+vi.mock('../../mobile/src/screens/BeeperRepliesScreen', () => ({ BeeperRepliesScreen: () => null }));
+vi.mock('../../mobile/src/screens/CommunitiesScreen', () => ({ CommunitiesScreen: () => null, CommunityScreen: () => null }));
+vi.mock('../../mobile/src/contexts/TranslationContext', () => ({ TranslationProvider: () => null }));
+vi.mock('../../mobile/src/components/GlobalNotice', () => ({ GlobalNotice: () => null }));
+vi.mock('../../mobile/src/screens/ContextReviewScreen', () => ({ ContextReviewScreen: () => null }));
+vi.mock('../../mobile/src/components/AgentOverlayButton', () => ({ AgentOverlayButton: () => null }));
+vi.mock('../../mobile/src/screens/ImportedPersonScreen', () => ({ ImportedPersonScreen: () => null }));
+vi.mock('../../mobile/src/screens/ImportedChatScreen', () => ({ ImportedChatScreen: () => null }));
+vi.mock('../../mobile/src/screens/ImportedChatsScreen', () => ({ ImportedChatsScreen: () => null }));
+vi.mock('../../mobile/src/components/DesktopKeyboardShortcuts', () => ({ DesktopKeyboardShortcuts: () => null }));
+vi.mock('../../mobile/src/components/WebDocumentTitle', () => ({ WebDocumentTitle: () => null }));
+vi.mock('../../mobile/src/components/UnlinkedSessionGate', () => ({ UnlinkedSessionGate: () => null }));
+vi.mock('../../mobile/src/components/DesktopDetailScreen', () => ({ DesktopDetailScreen: () => null }));
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   storage: new Map<string, string>(), auth: { isAuthed: false, authInitialized: true, currentUser: undefined as undefined | { userId: string; name: string } },
-  bootstrap: vi.fn(), dispatch: vi.fn(), profile: vi.fn(), listeners: new Map<string, () => void>(),
+  entryIntent: null as unknown, pushEligible: false, bootstrap: vi.fn(), dispatch: vi.fn(), profile: vi.fn(), listeners: new Map<string, () => void>(),
   check: undefined as undefined | (() => Promise<string | null>), route: 'Login', replace: undefined as undefined | ((name: string) => void),
 }));
 vi.mock('react-native', () => ({
@@ -35,13 +49,13 @@ vi.mock('@react-navigation/native-stack', () => ({ createNativeStackNavigator: (
     mocks.route = route?.props.name;
     mocks.replace = (name: string) => { setSelected(name); mocks.route = name; mocks.listeners.get('state')?.(); };
     if (!route) return null;
-    return route.props.component ? React.createElement(route.props.component, { navigation: { replace: mocks.replace } }) : route.props.children?.();
+    return route.props.component ? React.createElement(route.props.component, { navigation: { replace: mocks.replace } }) : route.props.children?.({ navigation: { replace: mocks.replace } });
   },
 }) }));
 vi.mock('@react-navigation/bottom-tabs', () => ({ BottomTabBar: () => null, createBottomTabNavigator: () => ({ Navigator: () => null, Screen: () => null }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ ThemeProvider: () => null, useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ ChatProvider: () => null, useChat: () => ({ ...mocks.auth, bootstrapIfAuthed: mocks.bootstrap, updateProfile: mocks.profile }) }));
-vi.mock('../../mobile/src/contexts/EntryContext', () => ({ EntryProvider: () => null, useEntryContext: () => ({ entryIntent: null }) }));
+vi.mock('../../mobile/src/contexts/EntryContext', () => ({ EntryProvider: () => null, useEntryContext: () => ({ entryIntent: mocks.entryIntent }) }));
 vi.mock('../../mobile/src/contexts/RecordingContext', () => ({ RecordingProvider: () => null }));
 vi.mock('../../mobile/src/contexts/PrivateNamesContext', () => ({ PrivateNamesProvider: () => null }));
 vi.mock('../../mobile/src/contexts/SocialExperienceContext', () => ({ SocialExperienceProvider: () => null, useSocialExperience: () => ({ enhanced: false }) }));
@@ -95,7 +109,7 @@ vi.mock('../../mobile/src/screens/StoryViewerScreen', () => ({ StoryViewerScreen
 vi.mock('../../mobile/src/screens/SocialReviewScreen', () => ({ SocialReviewScreen: () => null }));
 vi.mock('../../mobile/src/components/OfflineBanner', () => ({ OfflineBanner: () => null }));
 vi.mock('../../mobile/src/components/InAppMessageBanner', () => ({ InAppMessageBanner: () => null }));
-vi.mock('../../mobile/src/components/PushSoftAsk', () => ({ PushSoftAsk: () => null }));
+vi.mock('../../mobile/src/components/PushSoftAsk', () => ({ PushSoftAsk: ({ isAuthed }: { isAuthed: boolean }) => { mocks.pushEligible = isAuthed; return null; } }));
 vi.mock('../../mobile/src/components/GlobalRecordingBar', () => ({ GlobalRecordingBar: () => null }));
 vi.mock('../../mobile/src/screens/ComposeScreen', () => ({ ComposeScreen: () => null }));
 vi.mock('../../mobile/src/screens/OriginalMessageScreen', () => ({ OriginalMessageScreen: () => null }));
@@ -103,7 +117,7 @@ vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 import { Shell } from '../../mobile/App';
 import { captureComposeIntent, loadPendingComposeIntent } from '../../mobile/src/services/composeIntents';
 let root: ReturnType<typeof create> | undefined;
-beforeEach(() => { vi.clearAllMocks(); mocks.storage.clear(); mocks.listeners.clear(); mocks.check = undefined; mocks.auth = { isAuthed: false, authInitialized: true, currentUser: undefined }; mocks.route = 'Login'; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+beforeEach(() => { vi.clearAllMocks(); mocks.entryIntent = null; mocks.pushEligible = false; mocks.storage.clear(); mocks.listeners.clear(); mocks.check = undefined; mocks.auth = { isAuthed: false, authInitialized: true, currentUser: undefined }; mocks.route = 'Login'; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT; });
 it('waits after callback, enters real Onboarding, and only replays the same intent after Done replaces Main', async () => {
   const intent = { source: 'unlinked' as const, profile: 'https://www.unlinked.ai/people/public-id' };
@@ -124,6 +138,7 @@ it('waits after callback, enters real Onboarding, and only replays the same inte
   const press = async (label: string) => act(async () => root!.root.findAllByType('TouchableOpacity').find(node => node.props.accessibilityLabel === label)!.props.onPress());
   await press("Let's go"); await press('Skip'); await press('Done');
   expect(mocks.storage.get('openchat_onboarding_completed_v1')).toBe('1');
+  expect(mocks.pushEligible).toBe(true);
   expect(mocks.dispatch).toHaveBeenCalledOnce();
   expect(mocks.dispatch.mock.calls[0][0].params.params.params).toEqual({ ...intent, requestRevision: pending.revision });
 });
@@ -179,4 +194,16 @@ it('does not let a pending identity check complete navigation for a different si
   expect(mocks.route).toBe('Onboarding');
   expect(mocks.dispatch).not.toHaveBeenCalled();
   expect((await loadPendingComposeIntent())?.revision).toBe(pending.revision);
+});
+
+it('enables the notification soft ask immediately after compact invite onboarding finishes', async () => {
+  mocks.entryIntent = { clientIntentId: 'invite-fixture' };
+  mocks.auth = { isAuthed: true, authInitialized: true, currentUser: { userId: 'invited', name: 'Invited' } };
+  await act(async () => { root = create(React.createElement(Shell)); });
+  expect(mocks.route).toBe('Onboarding');
+  expect(mocks.pushEligible).toBe(false);
+  await act(async () => root!.root.findAllByType('TouchableOpacity').find(node => node.props.accessibilityLabel === 'Skip')!.props.onPress());
+  expect(mocks.route).toBe('Main');
+  expect(mocks.pushEligible).toBe(true);
+  expect(mocks.storage.get('openchat_push_softasked')).toBeUndefined();
 });
