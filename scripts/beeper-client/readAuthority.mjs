@@ -442,6 +442,7 @@ export class BeeperReadAuthority {
         ticket = Object.freeze({ grantId: s.id, jobId: v.jobId, requestId: v.requestId });
       const prior = this.#db.prepare('SELECT * FROM operations WHERE job=?').get(v.jobId);
       if (prior) {
+        if (['stopped', 'expired', 'revoked'].includes(prior.phase)) reject();
         if (
           prior.hash !== hash ||
           prior.request !== v.requestId ||
@@ -486,7 +487,7 @@ export class BeeperReadAuthority {
     const o = this.#db
       .prepare('SELECT * FROM operations WHERE job=? AND request=? AND grantId=?')
       .get(t.jobId, t.requestId, t.grantId);
-    if (!o || o.until <= this.clock() || o.phase === 'revoked') reject();
+    if (!o || o.until <= this.clock() || ['revoked', 'stopped', 'expired'].includes(o.phase)) reject();
     const s = this.#db.prepare('SELECT * FROM selections WHERE id=? AND revoked=0').get(o.grantId);
     if (!s) reject();
     return { ...this.#connection(s.route), s, o };
@@ -556,6 +557,16 @@ export class BeeperReadAuthority {
       const batch = this.nextPending(t);
       if (!batch || batch.sequence !== sequence) reject();
       return start(Object.freeze(batch));
+    });
+  }
+  /** Stop this exact authenticated request without reusing its sequence or GET.
+   * A fresh explicit native intent may then proceed; old ciphertext remains spent. */
+  abandon(t) {
+    return this.#tx(() => {
+      const o=this.#db.prepare('SELECT phase FROM operations WHERE job=? AND request=? AND grantId=?').get(t.jobId,t.requestId,t.grantId);
+      if(!o)reject();if(['done','revoked'].includes(o.phase))return;
+      this.#db.prepare("UPDATE operations SET phase='stopped' WHERE job=?").run(t.jobId);
+      this.#db.prepare('UPDATE batches SET payload=NULL WHERE job=?').run(t.jobId);
     });
   }
   acknowledge(t, ack) {

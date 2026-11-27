@@ -3,6 +3,7 @@ import type {BeeperReadConnection,BeeperReadJob,BeeperCatalogueEntry} from '../.
 
 export interface LocalBeeperReadCapability {
   protocol:'openchat.beeper.read.v1';
+  ownerId:string;
   route:string;
   audience:'beeper.read';
   machineKey:string;
@@ -16,7 +17,7 @@ export interface LocalBeeperReadCapability {
    * typed operation. It must never use a server-provided key or generic prompt. */
   sealRead(request:Readonly<Record<string,unknown>>):Promise<string>;
 }
-type Scope={route:string;audience:'beeper.read';machineKey:string;deviceKey:string;accountKey:string;chatKey:string};
+type Scope={ownerId:string;route:string;audience:'beeper.read';machineKey:string;deviceKey:string;accountKey:string;chatKey:string};
 type Resolver=(scope:Readonly<Scope>)=>Promise<LocalBeeperReadCapability|null>;
 let resolveLocal:Resolver|undefined;
 
@@ -31,10 +32,10 @@ export class BeeperSecureGrantRequired extends Error {
   readonly code='beeper_secure_grant_required';
   constructor(){super('Approve this selected chat on your paired Mac before reading it here. Secure Beeper pairing must be enabled first.');}
 }
-export async function authorizeBeeperRead(connection:BeeperReadConnection,job:BeeperReadJob,chat:BeeperCatalogueEntry):Promise<string>{
+export async function authorizeBeeperRead(connection:BeeperReadConnection,job:BeeperReadJob,chat:BeeperCatalogueEntry,ownerId:string):Promise<string>{
   const resolver=resolveLocal;
-  if(!resolver||connection.state!=='active'||!Number.isFinite(Date.parse(connection.expiresAt))||Date.parse(connection.expiresAt)<=Date.now())throw new BeeperSecureGrantRequired();
-  const scope:Scope={route:connection.id,audience:'beeper.read',machineKey:connection.machineKey,deviceKey:connection.deviceKey,accountKey:connection.accountKey,chatKey:chat.chatKey};
+  if(!ownerId||!resolver||connection.state!=='active'||!Number.isFinite(Date.parse(connection.expiresAt))||Date.parse(connection.expiresAt)<=Date.now())throw new BeeperSecureGrantRequired();
+  const scope:Scope={ownerId,route:connection.id,audience:'beeper.read',machineKey:connection.machineKey,deviceKey:connection.deviceKey,accountKey:connection.accountKey,chatKey:chat.chatKey};
   const grant=await resolver(Object.freeze(scope));
   if(resolveLocal!==resolver||!grant||grant.protocol!=='openchat.beeper.read.v1'||grant.expiresAt<=Date.now()
     ||(grant.display && (grant.display.title!==chat.title || grant.display.chatType!==chat.chatType))

@@ -43,7 +43,7 @@ jobs:
           test/importedChats.mobile.test.ts test/importedChats.test.ts
       - name: Beeper selected-chat client, GET-only adapter and secure-grant boundary
         working-directory: apps/server
-        run: npx vitest run test/beeperClient.mobile.test.ts test/beeperReadIntent.mobile.test.ts test/beeperDesktopApi.test.ts test/importedChats.test.ts
+        run: npx vitest run test/beeperClient.mobile.test.ts test/beeperReadIntent.mobile.test.ts test/beeperDesktopApi.test.ts test/beeperReadAuthority.test.ts test/beeperForegroundRunner.test.ts test/beeperRelayTransport.test.ts test/beeperForegroundCli.test.ts test/importedChats.test.ts
       - name: Message status, agent actions, built-in agent, auto replies and message links
         working-directory: apps/server
         run: >-
@@ -131,7 +131,7 @@ jobs:
           NEO4J_TEST_URI: bolt://127.0.0.1:7687
           NEO4J_TEST_USER: neo4j
           NEO4J_TEST_PASSWORD: private-alias-test-only
-        run: npx vitest run test/beeperRelay.integration.test.ts
+        run: npx vitest run --no-file-parallelism test/beeperRelay.integration.test.ts test/beeperReadFlow.integration.test.ts
       - name: Hosted Context private approval and durable worker on real Neo4j
         working-directory: apps/server
         env:

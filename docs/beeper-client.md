@@ -14,7 +14,7 @@ a deletion. Source timestamps do not order scans: server epochs do.
 ## Authorization and activation boundary
 
 A connection offer contains public keys, an opaque source account key and the
-hash of a dedicated importer token. Approving it in OpenChat scopes that
+hash of a dedicated importer token plus an HMAC of the immutable recipient/scope tuple. Approving it in OpenChat scopes that
 importer to one owner and account. It cannot authorize a Mac operation. The
 importer credential never works as an ordinary OpenChat session or agent key.
 
@@ -24,8 +24,10 @@ keys, destination and grant expiry. It authenticates each typed read with
 sequence and revocation checks on the Mac before any GET. A catalogue row or
 server job cannot select or enlarge that local scope. The client defaults to
 **Authorization required** until this capability is installed; no fallback
-signer or server-issued machine authority exists. This release does not claim
-that the secure registry or typed Mac verifier has been delivered.
+signer or server-issued machine authority exists. The source now includes this typed verifier and native registry, with a manual
+foreground runner. Their independent exact-head review and delivery are still
+required; source tests do not constitute activation. See
+[manual Mac operations](beeper-client-operations.md).
 
 The GET-only adapter uses the fixed loopback Beeper Desktop API and a token
 supplied locally by the caller. It discovers no credentials and has no Messages
@@ -45,10 +47,10 @@ expire after seven days, while saved chat/history and scan epochs remain.
 
 ## Explicit remaining product scope
 
-Read activation still requires a separately reviewed typed Mac verifier and
-reviewed local device registry binding, a foreground outbound relay runner,
-synthetic end-to-end checks, independent source/security approval and coordinated
-server, web and native delivery. No real source chat has been read for these
+Read activation still requires independent exact-head source/security approval,
+synthetic end-to-end/browser checks and coordinated server, web and native
+delivery. The implemented verifier, registry and foreground runner remain inert
+until the actual owner performs the separate local approvals and native actions. No real source chat has been read for these
 tests. Source tests do not verify macOS or a physical iPhone.
 
 The full client request also includes capability-gated replies and optional

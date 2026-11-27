@@ -10,7 +10,7 @@ integration('Beeper relay is a private transactional importer, not machine autho
   const fixture=`beeper-${Date.now()}-${Math.random().toString(36).slice(2)}`,uid=fixture+'-owner',other=fixture+'-other';
   const connectionId=createHash('sha256').update(fixture).digest('hex').slice(0,48),accountKey='1'.repeat(64),chatKey='2'.repeat(64);
   const secret='ocbr_'+randomBytes(32).toString('base64url'),relayTokenHash=createHash('sha256').update(secret).digest('hex');
-  const offer={protocol:'openchat.beeper.read.v1',destination:'https://chat.ideaflow.app',connectionId,accountKey,machineKey:'3'.repeat(64),deviceKey:'4'.repeat(64),catalogueGrantId:'5'.repeat(48),relayTokenHash,expiresAt:new Date(Date.now()+86400000).toISOString()};
+  const offer={protocol:'openchat.beeper.read.v1',destination:'https://chat.ideaflow.app',connectionId,accountKey,machineKey:'3'.repeat(64),deviceKey:'4'.repeat(64),catalogueGrantId:'5'.repeat(48),relayTokenHash,ownerUserId:uid,relayBinding:'',expiresAt:new Date(Date.now()+86400000).toISOString()};
   const app=express();let driver:Driver,db:typeof import('../src/db.js'),service:typeof import('../src/services/beeperRelay.js');
   let job:{id:string;epoch:number},lease:{leaseId:string},chatId:string;
   const auth=(id=uid,extra:Record<string,unknown>={})=>'Bearer '+jwt.sign({userId:id,email:'synthetic@example.test',...extra},process.env.JWT_SECRET||'dev-secret-change-me');
@@ -33,6 +33,7 @@ integration('Beeper relay is a private transactional importer, not machine autho
   beforeAll(async()=>{
     process.env.NEO4J_URI=uri!;process.env.NEO4J_USER=user!;process.env.NEO4J_PASSWORD=password!;
     db=await import('../src/db.js');service=await import('../src/services/beeperRelay.js');
+    offer.relayBinding=service.beeperRelayBinding(secret,offer as any);
     driver=neo4j.driver(uri!,neo4j.auth.basic(user!,password!));const s=driver.session();
     try{await service.ensureBeeperReadSchema(s);await(await import('../src/services/importedChats.js')).ensureImportedChatSchema(s);}finally{await s.close();}
     const {exceptImportBody}=await import('../src/routes/importedChats.js');app.use(exceptImportBody(express.json()));
@@ -48,6 +49,15 @@ integration('Beeper relay is a private transactional importer, not machine autho
     expect((await request(app).get(path+'/chats').set('Authorization',auth(other))).status).toBe(404);
     expect((await request(app).post('/api/beeper/relay/claim').set('Authorization',auth()).send({})).status).toBe(401);
     expect((await request(app).get('/api/beeper/connections').set('Authorization','Bearer '+secret)).status).toBe(401);
+  });
+  it('binds the importer credential to the locally approved recipient even if an edited public offer registers first',async()=>{
+    expect((await request(app).post('/api/beeper/connections').set('Authorization',auth(other)).send({offer})).status).toBe(403);
+    const route='9'.repeat(48),localToken='ocbr_'+randomBytes(32).toString('base64url');
+    const original={...offer,connectionId:route,relayTokenHash:createHash('sha256').update(localToken).digest('hex')};original.relayBinding=service.beeperRelayBinding(localToken,original as any);
+    const edited={...original,ownerUserId:other};expect((await request(app).post('/api/beeper/connections').set('Authorization',auth(other)).send({offer:edited})).status).toBe(201);
+    const publish=await request(app).post('/api/beeper/relay/catalogue').set('Authorization','Bearer '+localToken).send({items:[{accountKey,chatKey,network:'whatsapp',chatType:'group',title:'Must not disclose',capturedAt:new Date().toISOString(),lastActivityAt:null}],complete:false});
+    expect(publish.status).toBe(403);expect(publish.body.error).toBe('relay_owner_binding_mismatch');
+    expect(Number((await run(`MATCH(e:OpenChatBeeperCatalogue {connectionId:$route}) RETURN count(e) AS n`,{route})).records[0]!.get('n'))).toBe(0);
   });
   it('authenticates before a large upload and persists only the permitted catalogue fields',async()=>{
     const anonymous=await request(app).post('/api/beeper/relay/deliver').set('Content-Type','application/json').send('x'.repeat(150000));expect(anonymous.status).toBe(401);
@@ -90,6 +100,18 @@ integration('Beeper relay is a private transactional importer, not machine autho
     record=await run(`MATCH(c:OpenChatBeeperConnection {id:$id}) RETURN c.lastSuccessAt AS success`,{id:connectionId});expect(record.records[0]!.get('success')).toBeTypeOf('string');
     const rows=await run(`MATCH(m:OpenChatImportedMessage {ownerUserId:$uid,chatId:$chatId}) RETURN m.text AS text`,{uid,chatId});expect(rows.records).toHaveLength(1);expect(rows.records[0]!.get('text')).toBe('Synthetic edited source');
     const normal=await import('../src/services/importedChats.js');await expect(normal.importChat(uid,value,{importedBy:'owner'})).rejects.toMatchObject({status:409});
+  });
+  it('resumes the exact completed job to replay a lost final ACK and refuses old epochs',async()=>{
+    expect((await relayPost('claim',{})).body.job).toBeNull();
+    const resumed=await relayPost('resume',{jobId:job.id});expect(resumed.status).toBe(200);expect(resumed.body.job.id).toBe(job.id);
+    expect(resumed.body.job.nextSequence).toBe(2);expect(resumed.body.job).not.toHaveProperty('connectionId');
+    const changed=payload('Synthetic edited source','2026-11-26T22:59:00Z');changed.messages[0]!.editedAt='2026-11-26T23:01:00Z';
+    expect((await relayPost('deliver',batch(changed,1,true))).body.duplicate).toBe(true);
+    const old=job.id;await reserve('resume-superseding');expect((await relayPost('resume',{jobId:old})).status).toBe(409);
+    await run(`MATCH(j:OpenChatBeeperJob {id:$id}) SET j.leaseUntil='2000-01-01T00:00:00.000Z'`,{id:job.id});
+    const prior=lease.leaseId,renewed=await relayPost('resume',{jobId:job.id});expect(renewed.status).toBe(200);expect(renewed.body.job.id).toBe(job.id);expect(renewed.body.job.leaseId).not.toBe(prior);lease=renewed.body.job;
+    expect((await relayPost('fail',{jobId:job.id,leaseId:lease.leaseId,code:'source_unavailable'})).status).toBe(200);
+    expect((await relayPost('resume',{jobId:job.id})).status).toBe(409);
   });
   it('rolls back every import change and receipt when immutable source attribution conflicts',async()=>{
     await reserve('second');const invalid=payload('Must not overwrite');invalid.participants.push({sourceKey:'different-sender',displayName:'Other',nameSource:'unknown'});

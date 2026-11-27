@@ -151,7 +151,7 @@ export function enableBeeperReadRegistry(account: string) {
             req.operation !== 'readSelected' ||
             req.connectionId !== s.route ||
             req.grantId !== s.grantId ||
-            ['route', 'machineKey', 'deviceKey', 'accountKey', 'chatKey'].some(
+            ['ownerId','route', 'machineKey', 'deviceKey', 'accountKey', 'chatKey'].some(
               (k) => req[k] !== s[k as keyof Selection],
             ) ||
             !isHex(req.jobId, 48) ||

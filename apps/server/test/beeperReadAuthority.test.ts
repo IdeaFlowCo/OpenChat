@@ -125,7 +125,7 @@ async function fixture() {
       chatKey: selection.chatKey,
       connectionId: selection.route,
     };
-    const intent = await authorizeBeeperRead(conn as any, job as any, entry as any);
+    const intent = await authorizeBeeperRead(conn as any, job as any, entry as any,'owner');
     return { ...job, intent };
   };
   return { options, issue, entry, conn, publicOffer, relayToken, wire, selection, grantId, pins };
@@ -272,10 +272,10 @@ it('refuses a relabelled catalogue and changed selected chat before client autho
   const f = await fixture(),
     job = { id: id(), kind: 'open', epoch: 1, state: 'pending', nextSequence: 0 };
   await expect(
-    authorizeBeeperRead(f.conn as any, job as any, { ...f.entry, title: 'Other' } as any),
+    authorizeBeeperRead(f.conn as any, job as any, { ...f.entry, title: 'Other' } as any,'owner'),
   ).rejects.toThrow();
   await expect(
-    authorizeBeeperRead(f.conn as any, job as any, { ...f.entry, chatType: 'direct' } as any),
+    authorizeBeeperRead(f.conn as any, job as any, { ...f.entry, chatType: 'direct' } as any,'owner'),
   ).rejects.toThrow();
 });
 it('separates local catalogue disclosure from history and fences publication after asynchronous credential lookup', async () => {
@@ -338,15 +338,28 @@ it('binds the importer to the immutable approved principal and destination with 
 it('recovers the exact sealed device intent after resolver restart without consuming a second sequence', async () => {
   const f = await fixture(),
     job = { id: id(), kind: 'open', epoch: 1, state: 'pending', nextSequence: 0 };
-  const frame = await authorizeBeeperRead(f.conn as any, job as any, f.entry as any);
+  const frame = await authorizeBeeperRead(f.conn as any, job as any, f.entry as any,'owner');
   stop?.();
   stop = enableBeeperReadRegistry('owner');
-  expect(await authorizeBeeperRead(f.conn as any, job as any, f.entry as any)).toBe(frame);
+  expect(await authorizeBeeperRead(f.conn as any, job as any, f.entry as any,'owner')).toBe(frame);
   expect((openReadEnvelope(f.pins, 'read', frame, machine.secretKey) as any).sequence).toBe(1);
   const later = await authorizeBeeperRead(
     f.conn as any,
     { ...job, id: id(), epoch: 2 } as any,
     f.entry as any,
+    'owner',
   );
   expect((openReadEnvelope(f.pins, 'read', later, machine.secretKey) as any).sequence).toBe(2);
+});
+
+it('cannot use the previous signed-in account registry for an authorization in another account',async()=>{
+ const f=await fixture(),job={id:id(),kind:'open',epoch:1,state:'pending',nextSequence:0};
+ await expect(authorizeBeeperRead(f.conn as any,job as any,f.entry as any,'different-owner')).rejects.toThrow();
+});
+
+it('abandons only the exact staged read, refuses replay and admits a fresh explicit device sequence', async()=>{
+ const f=await fixture(),claim=await f.issue(),ticket=authority.prepare(claim),a=adapter();
+ await authority.read(ticket,a.api);expect(authority.nextPending(ticket)).not.toBeNull();
+ authority.abandon(ticket);expect(()=>authority.nextPending(ticket)).toThrow();expect(()=>authority.prepare(claim)).toThrow();
+ const next=authority.prepare(await f.issue('refresh',2));await authority.read(next,a.api);expect(a.send).toHaveBeenCalledTimes(2);
 });

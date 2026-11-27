@@ -3,7 +3,7 @@ import {requireAuth,requireDirectSession} from '../middleware/auth.js';
 import {ImportedChatError} from '../services/importedChats.js';
 import {BeeperRelayError,approveBeeperReadConnection,listBeeperReadConnections,revokeBeeperReadConnection,
   listBeeperCatalogue,requestBeeperRead,attachBeeperReadIntent,readBeeperJob,verifyBeeperRelayToken,
-  publishBeeperCatalogue,claimBeeperRead,deliverBeeperRead,failBeeperRead} from '../services/beeperRelay.js';
+  publishBeeperCatalogue,claimBeeperRead,resumeBeeperRead,deliverBeeperRead,failBeeperRead} from '../services/beeperRelay.js';
 
 function failure(error:unknown,res:Response){
   if(error instanceof BeeperRelayError){res.status(error.status).json({error:error.code});return;}
@@ -39,6 +39,7 @@ beeperRelayRoutes.use(noStore,async(req:Request,res:Response,next:NextFunction)=
 });
 beeperRelayRoutes.post('/catalogue',handler(req=>publishBeeperCatalogue(tokens.get(req)!,req.body)));
 beeperRelayRoutes.post('/claim',handler(req=>claimBeeperRead(tokens.get(req)!)));
+beeperRelayRoutes.post('/resume',handler(req=>resumeBeeperRead(tokens.get(req)!,req.body)));
 beeperRelayRoutes.post('/fail',handler(req=>failBeeperRead(tokens.get(req)!,req.body)));
 // Authentication precedes the larger parser. The service rechecks the grant
 // under its write locks after parsing, including revocation during an upload.

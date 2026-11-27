@@ -1068,7 +1068,7 @@ export interface BeeperReadJob {
 }
 export interface BeeperPublicOffer {
   protocol: 'openchat.beeper.read.v1'; destination: 'https://chat.ideaflow.app'; connectionId: string;
-  machineKey: string; deviceKey: string; accountKey: string; catalogueGrantId: string; relayTokenHash: string; expiresAt: string;
+  machineKey: string; deviceKey: string; accountKey: string; catalogueGrantId: string; relayTokenHash: string; relayBinding: string; ownerUserId: string; expiresAt: string;
 }
 
 export interface ImportedChatSummary { id: string; network: string; chatType: 'group' | 'direct'; title: string; coverage: ImportedCoverage; counts: { messages: number; participants: number; openAsks: number } }

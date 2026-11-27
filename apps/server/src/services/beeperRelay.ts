@@ -1,4 +1,4 @@
-import {createHash,randomBytes} from 'node:crypto';
+import {createHash,createHmac,timingSafeEqual,randomBytes} from 'node:crypto';
 import neo4j,{type ManagedTransaction,type Session} from 'neo4j-driver';
 import {getDriver} from '../db.js';
 import {importChatInTransaction,parseImportPayload} from './importedChats.js';
@@ -31,20 +31,27 @@ export function canonicalBeeperJson(value:unknown):string {
 }
 export const beeperPayloadDigest=(value:unknown)=>hash(canonicalBeeperJson(value));
 type Tx=ManagedTransaction;
-type Connection={id:string;ownerUserId:string;accountKey:string;machineKey:string;deviceKey:string;catalogueGrantId:string;expiresAt:string;state:string};
+type Connection={id:string;ownerUserId:string;accountKey:string;machineKey:string;deviceKey:string;catalogueGrantId:string;expiresAt:string;state:string;protocol:string;destination:string;relayBinding:string};
 
 /** Public local offer contains verifiers/public keys only. Its creation and
  * approval are actual owner actions; source installation never enrolls a Mac. */
 export interface BeeperReadOffer {
   protocol:'openchat.beeper.read.v1';connectionId:string;machineKey:string;deviceKey:string;
-  accountKey:string;catalogueGrantId:string;relayTokenHash:string;expiresAt:string;destination:'https://chat.ideaflow.app';
+  accountKey:string;catalogueGrantId:string;relayTokenHash:string;relayBinding:string;ownerUserId:string;expiresAt:string;destination:'https://chat.ideaflow.app';
 }
 export function parseBeeperReadOffer(body:unknown):BeeperReadOffer {
   const v=object(body),until=typeof v.expiresAt==='string'?Date.parse(v.expiresAt):NaN;
+  const fields=['protocol','connectionId','ownerUserId','machineKey','deviceKey','accountKey','catalogueGrantId','relayTokenHash','relayBinding','expiresAt','destination'];
+  if(Object.keys(v).length!==fields.length||Object.keys(v).some(key=>!fields.includes(key)))fail(400,'invalid_or_expired_offer');
   if(v.protocol!=='openchat.beeper.read.v1'||v.destination!=='https://chat.ideaflow.app'||!hex(v.connectionId,48)||!hex(v.machineKey,64)||!hex(v.deviceKey,64)
-    ||!hex(v.accountKey,64)||!hex(v.catalogueGrantId,48)||!hex(v.relayTokenHash,64)
+    ||!hex(v.accountKey,64)||!hex(v.catalogueGrantId,48)||!hex(v.relayTokenHash,64)||!hex(v.relayBinding,64)||!bounded(v.ownerUserId,200)
     ||!Number.isFinite(until)||until<=Date.now()||until>Date.now()+7*86400000)fail(400,'invalid_or_expired_offer');
   return v as unknown as BeeperReadOffer;
+}
+
+/** Bound to the locally approved recipient/source tuple, not an editable public offer. */
+export function beeperRelayBinding(token:string,offer:Pick<BeeperReadOffer,'protocol'|'connectionId'|'ownerUserId'|'machineKey'|'deviceKey'|'accountKey'|'catalogueGrantId'|'expiresAt'|'destination'>){
+  return createHmac('sha256',token).update(JSON.stringify([offer.protocol,offer.connectionId,offer.ownerUserId,offer.machineKey,offer.deviceKey,offer.accountKey,offer.catalogueGrantId,offer.expiresAt,offer.destination])).digest('hex');
 }
 
 export async function ensureBeeperReadSchema(session:Session){
@@ -63,7 +70,7 @@ async function transaction<T>(action:(tx:Tx)=>Promise<T>):Promise<T>{
 }
 async function connection(tx:Tx,ownerUserId:string,connectionId:string):Promise<Connection>{
   const r=await tx.run(`MATCH(c:OpenChatBeeperConnection {id:$connectionId,ownerUserId:$ownerUserId})
-    SET c.revision=coalesce(c.revision,0)+1 RETURN c{.id,.ownerUserId,.accountKey,.machineKey,.deviceKey,.catalogueGrantId,.expiresAt,.state} AS c`,{ownerUserId,connectionId});
+    SET c.revision=coalesce(c.revision,0)+1 RETURN c{.id,.ownerUserId,.accountKey,.machineKey,.deviceKey,.catalogueGrantId,.expiresAt,.state,.protocol,.destination,.relayBinding} AS c`,{ownerUserId,connectionId});
   if(!r.records.length)fail(404,'connection_not_available');
   return r.records[0]!.get('c') as Connection;
 }
@@ -85,6 +92,8 @@ async function relay<T>(token:string,action:(tx:Tx,c:Connection)=>Promise<T>):Pr
   }finally{await s.close();}
   return ownerConnection(ownerUserId!,connectionId!,async(tx,c)=>{
     active(c);
+    const expected=beeperRelayBinding(token,{...c,connectionId:c.id,protocol:'openchat.beeper.read.v1',destination:'https://chat.ideaflow.app'});
+    if(c.protocol!=='openchat.beeper.read.v1'||c.destination!=='https://chat.ideaflow.app'||!hex(c.relayBinding,64)||!timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(c.relayBinding,'hex')))fail(403,'relay_owner_binding_mismatch');
     const r=await tx.run(`MATCH(c:OpenChatBeeperConnection {id:$connectionId,ownerUserId:$ownerUserId,relayTokenHash:$tokenHash}) RETURN c.id AS id`,{connectionId,ownerUserId,tokenHash});
     if(!r.records.length)fail(401,'relay_not_authorized');return action(tx,c);
   });
@@ -93,16 +102,18 @@ export async function verifyBeeperRelayToken(token:string){return relay(token,as
 
 export async function approveBeeperReadConnection(ownerUserId:string,body:unknown){
   const offer=parseBeeperReadOffer(body);
+  if(offer.ownerUserId!==ownerUserId)fail(403,'source_owner_mismatch');
   return transaction(async tx=>{
     await ownerLock(tx,ownerUserId);
     const r=await tx.run(`MATCH(u:User {id:$ownerUserId})
       MERGE(c:OpenChatBeeperConnection {id:$id})
       ON CREATE SET c.ownerUserId=$ownerUserId,c.accountKey=$accountKey,c.machineKey=$machineKey,c.deviceKey=$deviceKey,
-        c.catalogueGrantId=$catalogueGrantId,c.relayTokenHash=$relayTokenHash,c.expiresAt=$expiresAt,c.state='active',c.createdAt=$now
+        c.catalogueGrantId=$catalogueGrantId,c.relayTokenHash=$relayTokenHash,c.relayBinding=$relayBinding,
+        c.protocol=$protocol,c.destination=$destination,c.expiresAt=$expiresAt,c.state='active',c.createdAt=$now
       RETURN c.ownerUserId=$ownerUserId AND c.accountKey=$accountKey AND c.machineKey=$machineKey
         AND c.deviceKey=$deviceKey AND c.catalogueGrantId=$catalogueGrantId AND c.expiresAt=$expiresAt
-        AND c.relayTokenHash=$relayTokenHash AND c.state='active' AS same`,
-    {ownerUserId,id:offer.connectionId,...offer,now:now()});
+        AND c.relayTokenHash=$relayTokenHash AND c.relayBinding=$relayBinding AND c.protocol=$protocol AND c.destination=$destination AND c.state='active' AS same`,
+    {...offer,ownerUserId,id:offer.connectionId,now:now()});
     if(r.records[0]?.get('same')!==true)fail(409,'connection_already_bound');
     return {id:offer.connectionId,state:'active',accountKey:offer.accountKey,expiresAt:offer.expiresAt};
   });
@@ -211,6 +222,28 @@ export async function claimBeeperRead(token:string){
     {connectionId:c.id,ownerUserId:c.ownerUserId,now:stamp,leaseId,leaseUntil});
     await tx.run(`MATCH(c:OpenChatBeeperConnection {id:$id}) SET c.heartbeatAt=$now`,{id:c.id,now:stamp});
     return {job:plain(r.records[0]?.get('job')??null)};
+  });
+}
+
+/** Resume one locally journalled read, including receipt replay after the final
+ * ACK was lost. This creates no machine authority and never selects another job. */
+export async function resumeBeeperRead(token:string,body:unknown){
+  const v=object(body);
+  if(!hex(v.jobId,48)||Object.keys(v).length!==1)fail(400,'invalid_request');
+  return relay(token,async(tx,c)=>{
+    const row=await tx.run(`MATCH(j:OpenChatBeeperJob {id:$jobId,connectionId:$connectionId,ownerUserId:$ownerUserId})
+      SET j.revision=coalesce(j.revision,0)+1 RETURN j{.*} AS j`,{jobId:v.jobId,connectionId:c.id,ownerUserId:c.ownerUserId});
+    if(!row.records.length)fail(404,'scan_not_available');const j=row.records[0]!.get('j') as Record<string,unknown>;
+    if(!j.intent||!['pending','leased','done'].includes(j.state as string))fail(409,'scan_superseded');
+    const current=await tx.run(`MATCH(e:OpenChatBeeperCatalogue {connectionId:$connectionId,ownerUserId:$ownerUserId,chatKey:$chatKey}) RETURN e.scanEpoch AS epoch`,{connectionId:c.id,ownerUserId:c.ownerUserId,chatKey:j.chatKey});
+    if(j.accountKey!==c.accountKey||number(current.records[0]?.get('epoch'))!==number(j.epoch))fail(409,'scan_superseded');
+    if(j.state!=='done'&&(j.state!=='leased'||String(j.leaseUntil)<=now())){
+      const busy=await tx.run(`MATCH(j:OpenChatBeeperJob {connectionId:$connectionId,ownerUserId:$ownerUserId,state:'leased'}) WHERE j.leaseUntil>$now RETURN count(j) AS n`,{connectionId:c.id,ownerUserId:c.ownerUserId,now:now()});
+      if(number(busy.records[0]?.get('n'))>=2)fail(429,'too_many_pending_scans');
+      await tx.run(`MATCH(j:OpenChatBeeperJob {id:$id}) SET j.state='leased',j.leaseId=$leaseId,j.leaseUntil=$leaseUntil`,{id:j.id,leaseId:randomBytes(24).toString('hex'),leaseUntil:new Date(Date.now()+60000).toISOString()});
+    }
+    const result=await tx.run(`MATCH(j:OpenChatBeeperJob {id:$id,connectionId:$connectionId,ownerUserId:$ownerUserId}) RETURN j{.id,.accountKey,.chatKey,.epoch,.kind,.intent,.nextSequence,.leaseId,.leaseUntil} AS job`,{id:j.id,connectionId:c.id,ownerUserId:c.ownerUserId});
+    return {job:plain(result.records[0]!.get('job'))};
   });
 }
 

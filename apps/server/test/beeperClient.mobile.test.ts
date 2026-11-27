@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const m = vi.hoisted(() => ({
   chat: {} as Record<string, any>, route: { params: { connectionId: 'connection-a', chatKey: 'chat-a', kind: 'open' } as any },
-  navigation: { navigate: vi.fn() }, text: [] as string[], authorize: vi.fn(),
+  navigation: { navigate: vi.fn() }, text: [] as string[], authorize: vi.fn(), acceptGrant: vi.fn(), enableRegistry: vi.fn(), alert: vi.fn(), clearRegistry: vi.fn(),
   api: { listBeeperConnections: vi.fn(), approveBeeperConnection: vi.fn(), revokeBeeperConnection: vi.fn(), getBeeperCatalogue: vi.fn(), requestBeeperRead: vi.fn(), attachBeeperReadIntent: vi.fn(), getBeeperReadJob: vi.fn() },
 }));
 vi.mock('react-native', async () => {
   const React = await import('react');
-  return { StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 }, View: 'View', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', TouchableOpacity: 'TouchableOpacity',
+  return { Alert: {alert:m.alert}, Platform:{OS:'ios'}, StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 }, View: 'View', TextInput: 'TextInput', ActivityIndicator: 'ActivityIndicator', ScrollView: 'ScrollView', TouchableOpacity: 'TouchableOpacity',
     Text: ({ children, ...props }: any) => { m.text.push(String(children)); return React.createElement('Text', props, children); } };
 });
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => m.navigation, useRoute: () => m.route, useFocusEffect: (cb: any) => React.useEffect(cb, [cb]) }));
@@ -17,6 +17,7 @@ vi.mock('expo-crypto', () => ({ randomUUID: () => 'synthetic-request-uuid' }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => m.chat }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
 vi.mock('../../mobile/src/api/client', () => ({ api: m.api }));
+vi.mock('../../mobile/src/services/beeper/deviceRegistry', () => ({acceptBeeperReadOffer:m.acceptGrant,enableBeeperReadRegistry:m.enableRegistry}));
 vi.mock('../../mobile/src/services/beeper/readIntent', () => ({ authorizeBeeperRead: m.authorize }));
 vi.mock('../../mobile/src/components/ui', () => ({ Button: 'Button', Card: 'Card', Chip: 'Chip', ListRow: 'ListRow', SectionLabel: 'SectionLabel' }));
 vi.mock('../../mobile/src/components/ImportedChatParts', () => ({ useImportedRoles: () => ({ text: 'text', textMeta: 'metadata', line: 'border', danger: 'danger' }) }));
@@ -34,6 +35,7 @@ async function press(label: string) { await act(async () => { buttons(label)[0].
 async function render(element: React.ReactElement) { await act(async () => { tree = create(element); }); await act(async () => { await vi.advanceTimersByTimeAsync(1); }); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  m.enableRegistry.mockReturnValue(m.clearRegistry);
   m.chat = { currentUser: { userId: 'owner-a' }, isIdentityVerified: true }; m.text.length = 0;
   m.route.params = { connectionId: 'connection-a', chatKey: 'chat-a', kind: 'open' };
   m.api.listBeeperConnections.mockResolvedValue([connection]);
@@ -54,7 +56,7 @@ describe('Beeper client explicit source reads', () => {
     expect(m.api.requestBeeperRead).toHaveBeenCalledWith('connection-a', { chatKey: 'chat-a', kind: 'open', clientRequestId: 'beeper-read:synthetic-request-uuid' });
     expect(m.authorize).not.toHaveBeenCalled(); expect(m.api.attachBeeperReadIntent).not.toHaveBeenCalled();
     await press('Authorize selected chat read');
-    expect(m.authorize).toHaveBeenCalledWith(connection, job, entry);
+    expect(m.authorize).toHaveBeenCalledWith(connection, job, entry,'owner-a');
     expect(m.api.attachBeeperReadIntent).toHaveBeenCalledWith('connection-a', 'job-a', 'synthetic-opaque-frame');
     expect(m.text.join(' ')).toContain('Waiting for Mac');
   });
@@ -117,8 +119,29 @@ describe('Beeper client explicit source reads', () => {
     expect(m.api.approveBeeperConnection).not.toHaveBeenCalled();
     expect(m.text.join(' ')).toContain('No connection was approved');
   });
+  it('imports no selected grant until a separate explicit native confirmation, then clears its resolver on account change', async () => {
+    m.acceptGrant.mockImplementation(async (_owner, _wire, confirm) => { if (!await confirm({title:'Locally approved chat',chatType:'group',expiresAt:Date.now()+3600000})) throw new Error('cancelled'); });
+    await render(React.createElement(BeeperChatsScreen)); await press('Set up Mac connection');
+    await act(async () => tree!.root.findByProps({accessibilityLabel:'Encrypted selected chat grant'}).props.onChangeText('encrypted-wire'));
+    expect(m.acceptGrant).not.toHaveBeenCalled(); expect(m.enableRegistry).not.toHaveBeenCalled();
+    await press('Review selected chat grant'); expect(m.alert).toHaveBeenCalledTimes(1); expect(m.enableRegistry).not.toHaveBeenCalled();
+    await act(async()=>m.alert.mock.calls[0][2][1].onPress());
+    expect(m.acceptGrant).toHaveBeenCalledWith('owner-a','encrypted-wire',expect.any(Function));
+    expect(m.enableRegistry).toHaveBeenCalledWith('owner-a');
+    m.chat.currentUser={userId:'owner-b'}; await act(async()=>tree!.update(React.createElement(BeeperChatsScreen)));
+    expect(m.clearRegistry).toHaveBeenCalledTimes(1);
+  });
+  it('does not enable a native signer after its confirmation crosses an account boundary', async () => {
+    m.acceptGrant.mockImplementation(async (_owner,_wire,confirm)=>{if(!await confirm({title:'Private chat',chatType:'direct',expiresAt:Date.now()+3600000}))throw new Error('cancelled');});
+    await render(React.createElement(BeeperChatsScreen));await press('Set up Mac connection');
+    await act(async()=>tree!.root.findByProps({accessibilityLabel:'Encrypted selected chat grant'}).props.onChangeText('encrypted-wire'));
+    await press('Review selected chat grant');m.chat.isIdentityVerified=false;
+    await act(async()=>tree!.update(React.createElement(BeeperChatsScreen)));
+    await act(async()=>m.alert.mock.calls[0][2][1].onPress());
+    expect(m.enableRegistry).not.toHaveBeenCalled();
+  });
   it('requires review and a separate explicit approval for a valid public Mac offer', async () => {
-    const offer = { protocol: 'openchat.beeper.read.v1', destination: 'https://chat.ideaflow.app', connectionId: 'a'.repeat(48), machineKey: 'b'.repeat(64), deviceKey: 'c'.repeat(64), accountKey: 'd'.repeat(64), catalogueGrantId: 'e'.repeat(48), relayTokenHash: 'f'.repeat(64), expiresAt: new Date(Date.now() + 3600000).toISOString() };
+    const offer = { protocol: 'openchat.beeper.read.v1', destination: 'https://chat.ideaflow.app', connectionId: 'a'.repeat(48), machineKey: 'b'.repeat(64), deviceKey: 'c'.repeat(64), accountKey: 'd'.repeat(64), catalogueGrantId: 'e'.repeat(48), relayTokenHash: 'f'.repeat(64), relayBinding:'0'.repeat(64),ownerUserId:'owner-a', expiresAt: new Date(Date.now() + 3600000).toISOString() };
     await render(React.createElement(BeeperChatsScreen)); await press('Set up Mac connection');
     await act(async () => tree!.root.findByProps({ accessibilityLabel: 'Public Mac offer' }).props.onChangeText(JSON.stringify(offer)));
     await press('Review Mac offer');
@@ -134,8 +157,16 @@ describe('Beeper client explicit source reads', () => {
     expect(beeperJobState({ ...job, state: 'done' } as any, true)).toBe('Completion not yet confirmed');
   });
   it('rejects extra offer fields that could contain private keys or tokens', () => {
-    const publicOffer = { protocol: 'openchat.beeper.read.v1', destination: 'https://chat.ideaflow.app', connectionId: 'a'.repeat(48), machineKey: 'b'.repeat(64), deviceKey: 'c'.repeat(64), accountKey: 'd'.repeat(64), catalogueGrantId: 'e'.repeat(48), relayTokenHash: 'f'.repeat(64), expiresAt: new Date(Date.now() + 3600000).toISOString() };
+    const publicOffer = { protocol: 'openchat.beeper.read.v1', destination: 'https://chat.ideaflow.app', connectionId: 'a'.repeat(48), machineKey: 'b'.repeat(64), deviceKey: 'c'.repeat(64), accountKey: 'd'.repeat(64), catalogueGrantId: 'e'.repeat(48), relayTokenHash: 'f'.repeat(64), relayBinding:'0'.repeat(64),ownerUserId:'owner-a', expiresAt: new Date(Date.now() + 3600000).toISOString() };
     expect(() => parsePublicBeeperOffer(JSON.stringify({ ...publicOffer, privateKey: 'never-send' }))).toThrow();
     expect(parsePublicBeeperOffer(JSON.stringify(publicOffer)).destination).toBe('https://chat.ideaflow.app');
   });
+});
+
+it('does not offer authorization when reservation and selected read kinds differ',async()=>{
+ m.api.requestBeeperRead.mockResolvedValue({...job,kind:'refresh'});
+ await render(React.createElement(BeeperReadScreen));expect(m.api.getBeeperReadJob).not.toHaveBeenCalled();expect(buttons('Authorize selected chat read')).toHaveLength(0);expect(m.authorize).not.toHaveBeenCalled();expect(m.text.join(' ')).toContain('different read is already pending');
+});
+it.each([{...job,id:'substituted-job'},{...job,kind:'earlier'}])('rejects a refetched job that differs from the reserved read before approval',async changed=>{
+ m.api.getBeeperReadJob.mockResolvedValue(changed);await render(React.createElement(BeeperReadScreen));expect(buttons('Authorize selected chat read')).toHaveLength(0);expect(m.api.attachBeeperReadIntent).not.toHaveBeenCalled();expect(m.authorize).not.toHaveBeenCalled();expect(m.text.join(' ')).toContain('different read is already pending');
 });

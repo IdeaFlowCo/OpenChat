@@ -1,9 +1,10 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import * as Crypto from 'expo-crypto';
 import { api, type BeeperCatalogueEntry, type BeeperPublicOffer, type BeeperReadConnection, type BeeperReadJob } from '../api/client';
 import { authorizeBeeperRead } from '../services/beeper/readIntent';
+import { acceptBeeperReadOffer, enableBeeperReadRegistry } from '../services/beeper/deviceRegistry';
 import { useChat } from '../contexts/ChatContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getColors } from '../theme/colors';
@@ -34,21 +35,43 @@ export function BeeperChatsScreen() {
   const { currentUser, isIdentityVerified } = useChat();
   const owner = isIdentityVerified ? currentUser?.userId : undefined;
   const live = useRef(owner); live.current = owner;
-  return owner ? <BeeperHome key={owner} isCurrent={() => live.current === owner} /> : <Page><Note>Verifying your account…</Note></Page>;
+  return owner ? <BeeperHome key={owner} ownerId={owner} isCurrent={() => live.current === owner} /> : <Page><Note>Verifying your account…</Note></Page>;
 }
 export function BeeperReadScreen() {
   const { currentUser, isIdentityVerified } = useChat();
   const { params } = useRoute<RouteProps<'BeeperRead'>>();
   const scope = isIdentityVerified && currentUser?.userId ? JSON.stringify([currentUser.userId, params.connectionId, params.chatKey, params.kind, params.requestRevision]) : undefined;
   const live = useRef(scope); live.current = scope;
-  return scope ? <ReadSession key={scope} params={params} isCurrent={() => live.current === scope} /> : <Page><Note>Verifying your account…</Note></Page>;
+  return scope ? <ReadSession key={scope} ownerId={currentUser!.userId} params={params} isCurrent={() => live.current === scope} /> : <Page><Note>Verifying your account…</Note></Page>;
 }
 
-function BeeperHome({ isCurrent }: { isCurrent: () => boolean }) {
+function BeeperHome({ isCurrent,ownerId }: { isCurrent: () => boolean;ownerId:string }) {
   const r = useRoles(), guard = useVisit(isCurrent), navigation = useNavigation<NavProp<'BeeperChats'>>();
   const [connections, setConnections] = useState<BeeperReadConnection[] | null>(null), [selected, setSelected] = useState('');
   const [error, setError] = useState(''), [showSetup, setShowSetup] = useState(false), [offerText, setOfferText] = useState('');
   const [offer, setOffer] = useState<BeeperPublicOffer | null>(null), [busy, setBusy] = useState(false), pending = useRef(false);
+  const [grantText, setGrantText] = useState(''), [grantReady, setGrantReady] = useState(false);
+  const clearRegistry = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => () => { clearRegistry.current?.(); }, []);
+  const importGrant = async () => {
+    if (pending.current || !grantText.trim()) return;
+    const valid = guard(); if (!valid()) return;
+    if (Platform.OS === 'web') { setError('Use the paired native OpenChat app to approve a selected chat grant.'); return; }
+    pending.current = true; setBusy(true); setError('');
+    try {
+      await acceptBeeperReadOffer(ownerId, grantText.trim(), scope => new Promise(resolve => {
+        if (!valid()) { resolve(false); return; }
+        Alert.alert('Approve selected chat', `${scope.title} · ${scope.chatType}\nRead-only until ${stamp(new Date(scope.expiresAt).toISOString())}.\nSelected messages will be stored privately at https://chat.ideaflow.app. This does not send or share messages.`, [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Approve chat grant', onPress: () => resolve(valid()) },
+        ], { cancelable: true, onDismiss: () => resolve(false) });
+      }));
+      if (!valid()) return;
+      clearRegistry.current?.(); clearRegistry.current = enableBeeperReadRegistry(ownerId);
+      setGrantReady(true); setGrantText('');
+    } catch (e) { if (valid()) setError(beeperFailure(e)); }
+    finally { pending.current = false; if (valid()) setBusy(false); }
+  };
   const approvalRef = useRef(offer); approvalRef.current = offer;
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const sequence = useRef(0);
@@ -65,6 +88,7 @@ function BeeperHome({ isCurrent }: { isCurrent: () => boolean }) {
   const approve = async () => {
     if (pending.current || !offer || approvalRef.current !== offer) return;
     const valid = guard(); if (!valid()) return;
+    if(offer.ownerUserId!==ownerId){setError(beeperFailure(new Error('source_owner_mismatch')));return;}
     pending.current = true; setBusy(true); setError('');
     try {
       await api.approveBeeperConnection(offer);
@@ -94,10 +118,16 @@ function BeeperHome({ isCurrent }: { isCurrent: () => boolean }) {
       <TextInput accessibilityLabel="Public Mac offer" placeholder="Paste public offer JSON" placeholderTextColor={r.textMeta} multiline autoCapitalize="none" autoCorrect={false}
         value={offerText} maxLength={6000} onChangeText={value => { setOfferText(value); setOffer(null); }} style={[styles.input, styles.multiline, { color: r.text, borderColor: r.line, backgroundColor: r.input }]} />
       <Button label="Review Mac offer" disabled={!offerText.trim() || busy} onPress={() => {
-        try { setOffer(parsePublicBeeperOffer(offerText)); setError(''); } catch { setOffer(null); setError('This is not a valid public Mac offer for chat.ideaflow.app. No connection was approved.'); }
+        try { const parsed=parsePublicBeeperOffer(offerText);if(parsed.ownerUserId!==ownerId)throw new Error('source_owner_mismatch');setOffer(parsed); setError(''); } catch { setOffer(null); setError('This is not a valid public Mac offer for chat.ideaflow.app. No connection was approved.'); }
       }} />
       {offer && <><Note>{`Approve read-only access for account ${offer.accountKey.slice(0, 12)}… on Mac ${offer.machineKey.slice(0, 12)}… until ${stamp(offer.expiresAt)}?`}</Note>
         <Button label="Approve read-only connection" variant="primary" loading={busy} onPress={() => { void approve(); }} /></>}
+      <SectionLabel>Selected chat approval</SectionLabel>
+      <Note>After approving a chat locally on your Mac, paste its encrypted grant here. Only your paired native device can open it. Each source read still asks for authorization.</Note>
+      <TextInput accessibilityLabel="Encrypted selected chat grant" placeholder="Paste encrypted grant" placeholderTextColor={r.textMeta} multiline autoCapitalize="none" autoCorrect={false}
+        value={grantText} maxLength={12000} onChangeText={setGrantText} style={[styles.input, styles.multiline, { color: r.text, borderColor: r.line, backgroundColor: r.input }]} />
+      <Button label="Review selected chat grant" disabled={!grantText.trim() || busy} loading={busy} onPress={() => { void importGrant(); }} />
+      {grantReady && <Note>Chat grant approved on this device. Select the same chat below, then authorize its read.</Note>}
     </Card>}
     <SectionLabel>Connections</SectionLabel>
     {!connections && !error && <ActivityIndicator color={r.accent} accessibilityLabel="Loading Beeper connections" />}
@@ -148,7 +178,7 @@ function Catalogue({ connection, guard, open }: { connection: BeeperReadConnecti
   </>;
 }
 
-function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['params']; isCurrent: () => boolean }) {
+function ReadSession({ params, isCurrent,ownerId }: { ownerId:string;params: RouteProps<'BeeperRead'>['params']; isCurrent: () => boolean }) {
   const r = useRoles(), guard = useVisit(isCurrent), navigation = useNavigation<NavProp<'BeeperRead'>>();
   const [source, setSource] = useState<{ connection: BeeperReadConnection; chat: BeeperCatalogueEntry } | null>(null);
   const [job, setJob] = useState<BeeperReadJob | null>(null), [error, setError] = useState('');
@@ -169,8 +199,11 @@ function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['
       requestId.current ??= `beeper-read:${Crypto.randomUUID()}`;
       const reserved = jobRef.current ?? await api.requestBeeperRead(connection.id, { chatKey: chat.chatKey, clientRequestId: requestId.current, kind: params.kind });
       if (!valid()) return;
+      if(reserved.kind!==params.kind)throw new Error('source_request_mismatch');
       const next = await api.getBeeperReadJob(connection.id, reserved.id);
-      if (!valid()) return; jobRef.current = next; setJob(next);
+      if (!valid()) return;
+      if(next.id!==reserved.id||next.kind!==params.kind)throw new Error('source_request_mismatch');
+      jobRef.current = next; setJob(next);
       // A leased job already has a device-authorized intent. Pending jobs need
       // the explicit authorization button; reservation itself grants no read.
       if (next.state === 'leased') { setAuthorized(true); setPolling(true); }
@@ -180,9 +213,10 @@ function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['
   useFocusEffect(useCallback(() => { void prepare(); }, [prepare]));
   const authorize = async () => {
     const valid = guard(); if (!valid() || !source || !job || pending.current) return;
+    if(job.kind!==params.kind||jobRef.current?.id!==job.id){setError(beeperFailure(new Error('source_request_mismatch')));return;}
     pending.current = true; setBusy(true); setError('');
     try {
-      const frame = await authorizeBeeperRead(source.connection, job, source.chat); if (!valid()) return;
+      const frame = await authorizeBeeperRead(source.connection, job, source.chat,ownerId); if (!valid()) return;
       await api.attachBeeperReadIntent(source.connection.id, job.id, frame); if (!valid()) return;
       setAuthorized(true); setPolling(true);
     } catch (e) { if (valid()) setError(beeperFailure(e)); }
@@ -194,6 +228,7 @@ function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['
     try {
       const next = await api.getBeeperReadJob(params.connectionId, job.id);
       if (!valid()) return;
+      if(next.id!==job.id||next.kind!==params.kind)throw new Error('source_request_mismatch');
       jobRef.current = next; setJob(next); setError('');
       if (next.state === 'leased') { setAuthorized(true); setPolling(true); }
     } catch (e) { if (valid()) setError(beeperFailure(e)); }
@@ -204,8 +239,10 @@ function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['
     const valid = guard(); let stopped = false, timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const next = await api.getBeeperReadJob(params.connectionId, jobRef.current!.id);
+        const requested=jobRef.current!.id;
+        const next = await api.getBeeperReadJob(params.connectionId, requested);
         if (stopped || !valid()) return;
+        if(next.id!==requested||next.kind!==params.kind)throw new Error('source_request_mismatch');
         jobRef.current = next; setJob(next); setError('');
         if (['done', 'failed', 'cancelled'].includes(next.state)) { setPolling(false); return; }
       } catch (e) { if (!stopped && valid()) setError(beeperFailure(e)); }
@@ -213,7 +250,7 @@ function ReadSession({ params, isCurrent }: { params: RouteProps<'BeeperRead'>['
     };
     void poll();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [guard, params.connectionId, polling]));
+  }, [guard, params.connectionId, params.kind, polling]));
   const chatId = job?.chatId ?? source?.chat.importedChatId;
   const openSaved = () => {
     if (!guard()() || !chatId || !source) return;

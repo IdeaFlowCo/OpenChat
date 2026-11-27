@@ -8,6 +8,9 @@ export function beeperFailure(error: unknown): string {
   }
   const copy: Record<string, string> = {
     invalid_or_expired_offer: 'This Mac offer is invalid or expired. Create a new public offer on your Mac.',
+    source_request_mismatch: 'A different read is already pending. Return to Beeper chats to open the matching request.',
+    source_owner_mismatch: 'This offer belongs to a different OpenChat account. Create a new offer for your signed-in account on the Mac.',
+    relay_owner_binding_mismatch: 'This connection does not match the Mac-approved account. Create a fresh public offer on your Mac.',
     connection_already_bound: 'This offer is already bound. Create a new public offer on your Mac.',
     connection_revoked_or_expired: 'This connection was revoked or expired. A new approval is required.',
     connection_not_available: 'This connection is unavailable for your account.',
@@ -16,6 +19,10 @@ export function beeperFailure(error: unknown): string {
     scan_already_started: 'This read has already started. Check its progress.',
     scan_not_available: 'This read is no longer available for your account.',
     scan_superseded: 'A newer read replaced this one. Request a new source refresh.',
+    source_authorization_required: 'Approve a read-only Beeper connection on your Mac, then request this chat again.',
+    source_unavailable: 'Beeper Desktop is unavailable on your Mac. Open it before requesting this chat again.',
+    source_incompatible: 'This source response needs review. The saved copy may be partial.',
+    local_approval_required: 'Approve a new selected-chat grant on your Mac before requesting this read again.',
     source_reconciliation_required: 'The source changed and needs reconciliation on the Mac. This copy may be partial.',
     beeper_secure_grant_required: 'Authorization required. Approve this selected chat on your paired Mac first. Secure device pairing must be enabled before a source read can run.',
     device_authorization_required: 'Authorization required on your paired device before the Mac can read this chat.',
@@ -48,14 +55,15 @@ export function beeperJobState(job: BeeperReadJob | null, authorized: boolean): 
  * unknown fields and a different destination are never accepted by this UI. */
 export function parsePublicBeeperOffer(text: string): BeeperPublicOffer {
   const value: unknown = JSON.parse(text);
-  const fields = ['protocol', 'destination', 'connectionId', 'machineKey', 'deviceKey', 'accountKey', 'catalogueGrantId', 'relayTokenHash', 'expiresAt'];
+  const fields = ['protocol', 'destination', 'connectionId', 'machineKey', 'deviceKey', 'accountKey', 'catalogueGrantId', 'relayTokenHash', 'relayBinding', 'ownerUserId', 'expiresAt'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.length || Object.keys(value).some(key => !fields.includes(key))) throw new Error('invalid_or_expired_offer');
   const v = value as Record<string, unknown>;
   if (v.protocol !== 'openchat.beeper.read.v1' || v.destination !== 'https://chat.ideaflow.app'
+    || typeof v.ownerUserId!=='string'||!v.ownerUserId||v.ownerUserId.length>200||Array.from(v.ownerUserId).some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)
     || fields.some(key => typeof v[key] !== 'string') || !Number.isFinite(Date.parse(v.expiresAt as string))
     || Date.parse(v.expiresAt as string) <= Date.now() || Date.parse(v.expiresAt as string) > Date.now() + 7 * 86400000
     || ['connectionId', 'catalogueGrantId'].some(key => !/^[a-f0-9]{48}$/.test(v[key] as string))
-    || ['machineKey', 'deviceKey', 'accountKey', 'relayTokenHash'].some(key => !/^[a-f0-9]{64}$/.test(v[key] as string))) throw new Error('invalid_or_expired_offer');
+    || ['machineKey', 'deviceKey', 'accountKey', 'relayTokenHash', 'relayBinding'].some(key => !/^[a-f0-9]{64}$/.test(v[key] as string))) throw new Error('invalid_or_expired_offer');
   return v as unknown as BeeperPublicOffer;
 }
