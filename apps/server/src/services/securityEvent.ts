@@ -13,22 +13,7 @@
 // sha256 of the lowercased address), so failures never carry raw emails.
 
 import { createHash } from 'crypto';
-import { createRequire } from 'node:module';
-import { isIP } from 'node:net';
 import type { Request, Response, NextFunction } from 'express';
-
-const proxyAddr = createRequire(import.meta.url)('proxy-addr') as {
-  compile(ranges: string[]): (address: string) => boolean;
-};
-
-/** Trust only the immediate socket peer at the literal IP bound to nginx. */
-export function trustedProxyHop(configuredPeer = process.env.OPENCHAT_TRUSTED_PROXY) {
-  if (configuredPeer && (!isIP(configuredPeer) || configuredPeer.includes('%')))
-    throw Error('OPENCHAT_TRUSTED_PROXY must be one literal nginx IP address');
-  const matches = configuredPeer ? proxyAddr.compile([configuredPeer]) : undefined;
-  return (address: string, hop: number): boolean =>
-    hop === 0 && Boolean(matches && isIP(address) && matches(address));
-}
 
 export type SecurityOutcome = 'success' | 'failure' | 'denied';
 

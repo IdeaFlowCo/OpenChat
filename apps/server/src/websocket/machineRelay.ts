@@ -5,13 +5,13 @@ import { isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 import type { Server, Socket } from 'socket.io';
 import { validateToken } from '../middleware/auth.js';
-import { securityEvent, trustedProxyHop } from '../services/securityEvent.js';
+import { securityEvent } from '../services/securityEvent.js';
+import type { ProxyTrust } from '../services/nginxProxyTrust.js';
 
 /** Only one concrete, operator-bound nginx peer may supply the nearest forwarded hop.
  * With no pin, record only the transport peer. Addresses never allocate relay capacity.
  */
-export function relayAddressReader(configuredPeer = process.env.OPENCHAT_TRUSTED_PROXY) {
-  const trusted = trustedProxyHop(configuredPeer);
+export function relayAddressReader(trusted: ProxyTrust) {
   return (req: IncomingMessage): string => {
     const peer = req.socket.remoteAddress;
     if (!peer || !isIP(peer)) return 'unknown';
@@ -36,8 +36,8 @@ interface Registration {
   machine?: Socket;
   device?: Socket;
 }
-export function attachMachineRelay(io: Server, idleMs = 120_000) {
-  const readAddress = relayAddressReader();
+export function attachMachineRelay(io: Server, idleMs = 120_000, trusted: ProxyTrust = () => false) {
+  const readAddress = relayAddressReader(trusted);
   let nextDenialLog = 0;
   const routes = new Map<string, Registration>();
   const relay = io.of('/machine-agent-v2');

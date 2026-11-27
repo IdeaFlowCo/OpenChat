@@ -1,7 +1,8 @@
 import askPublicationsRoutes from './routes/askPublications.js';
 import visionSaveRoutes from './routes/visionSave.js';
 import visionBridgeRoutes, { visionSessionGuard } from './routes/visionBridge.js';
-import { securityRateLimitMonitor, trustedProxyHop } from './services/securityEvent.js';
+import { securityRateLimitMonitor } from './services/securityEvent.js';
+import { createNginxProxyTrust } from './services/nginxProxyTrust.js';
 import { startVisionReplyWorker } from './services/visionBridge.js';
 import contextIntentionsRoutes from './routes/contextIntentions.js';
 import conversationContentRoutes from './routes/conversationContent.js';
@@ -84,12 +85,13 @@ const connectorDelegation = createConnectorDelegation();
 
 const app = express();
 
-// Express IP, protocol and host attribution accept forwarded data only from
-// the operator-pinned immediate nginx peer. Load the pin after dotenv config.
-app.set('trust proxy', trustedProxyHop());
+// One expiring Docker-DNS snapshot supplies both synchronous trust predicates.
+const nginx = createNginxProxyTrust(process.env.OPENCHAT_TRUSTED_PROXY);
+app.set('trust proxy', nginx.trust);
 app.use(securityRateLimitMonitor);
 
 const httpServer = createServer(app);
+httpServer.once('close', nginx.close);
 
 // CORS configuration
 const allowedOrigins = [
@@ -108,7 +110,7 @@ const io = new Server(httpServer, {
   }
 });
 
-attachMachineRelay(io);
+attachMachineRelay(io, undefined, nginx.trust);
 
 // Middleware
 app.use(cors({

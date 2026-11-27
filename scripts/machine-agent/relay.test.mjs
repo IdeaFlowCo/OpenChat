@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createNginxProxyTrust } from '../../apps/server/src/services/nginxProxyTrust.ts';
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -94,21 +95,24 @@ test('only a direct signed-in device receives the opposite peer’s ciphertext',
   await peer(credentials('synthetic').device);
 });
 
-test('only the pinned immediate nginx address supplies a single observed hop', () => {
+test('only the pinned immediate nginx address supplies a single observed hop', async (t) => {
   const req = (peer, xff) => ({ socket: { remoteAddress: peer }, headers: { 'x-forwarded-for': xff } });
-  const read = relayAddressReader('172.18.0.8');
+  const proxy = createNginxProxyTrust('noos_nginx', async family => [{
+    address: family === 4 ? '172.18.0.8' : 'fd00::8', ttl: 10,
+  }]);
+  t.after(proxy.close);
+  await proxy.refresh();
+  const read = relayAddressReader(proxy.trust);
   for (const peer of ['127.0.0.1', '::1', '172.18.0.1', '172.18.0.9', 'fd00::1', '198.51.100.1'])
     assert.equal(read(req(peer, '203.0.113.77')), peer);
   assert.equal(read(req('::ffff:172.18.0.8', '203.0.113.77, 198.51.100.2')), '198.51.100.2');
   assert.equal(read(req('172.18.0.8', '2001:db8::2')), '2001:db8::2');
   for (const invalid of [undefined, ['203.0.113.77'], '203.0.113.77, nonsense', '203.0.113.77, '])
     assert.equal(read(req('172.18.0.8', invalid)), '172.18.0.8');
-  assert.equal(relayAddressReader('')(req('172.18.0.8', '203.0.113.77')), '172.18.0.8');
-  const readV6 = relayAddressReader('fd00::8');
-  assert.equal(readV6(req('fd00::8', '203.0.113.77, fd00::1')), 'fd00::1');
-  assert.equal(readV6(req('fd00::9', '203.0.113.77')), 'fd00::9');
-  for (const setting of ['uniquelocal', '172.18.0.0/16', 'nginx', '172.18.0.8,172.18.0.9', 'fe80::1%eth0'])
-    assert.throws(() => relayAddressReader(setting), /one literal nginx IP/);
+  assert.equal(relayAddressReader(() => false)(req('172.18.0.8', '203.0.113.77')), '172.18.0.8');
+  assert.equal(read(req('fd00::8', '203.0.113.77, fd00::1')), 'fd00::1');
+  assert.equal(read(req('fd00::9', '203.0.113.77')), 'fd00::9');
+
 });
 
 test('shared ingress can admit 40 routes from five principals while each principal is limited to eight', async (t) => {
