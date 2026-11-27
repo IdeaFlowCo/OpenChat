@@ -28,6 +28,8 @@ local review. The native app can explicitly transport the same encrypted request
 again after a dropped enqueue response, but cannot re-sign it, change text/target
 or rebind its operation to another Mac. Expired unsubmitted drafts may be
 discarded locally; submitted/unknown attempts cannot be cleared as if unsent.
+Passive owner-local status remains visible when a target grant expires or is
+missing. Viewing that metadata never loads keys, signs or retries a request.
 
 The provider adapter uses fixed loopback paths, designated local write credentials,
 GET preflight, a single text POST and a pending-ID status GET. It refuses merged

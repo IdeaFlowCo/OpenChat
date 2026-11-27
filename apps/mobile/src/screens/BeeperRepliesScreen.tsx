@@ -9,7 +9,7 @@ import {useTheme} from '../contexts/ThemeContext';
 import {getColors} from '../theme/colors';
 import {Button,Card,Chip,ListRow,SectionLabel} from '../components/ui';
 import {radius,roles,space,type} from '../theme/tokens';
-import {importWriteOffer,listWriteGrants,prepareSend,getSendDisplay,markSubmitAttempt,resumeSubmittedSend,recordSendReceipt,disableWriteGrant,cancelPreparedSend} from '../services/beeper/writeRegistry';
+import {importWriteOffer,listWriteGrants,prepareSend,getSendDisplay,markSubmitAttempt,resumeSubmittedSend,recordSendReceipt,disableWriteGrant,cancelPreparedSend,listSendSummaries} from '../services/beeper/writeRegistry';
 type Grant=Awaited<ReturnType<typeof listWriteGrants>>[number];
 type Operation=Awaited<ReturnType<typeof getSendDisplay>>;
 const terminal=(state:string)=>['confirmed','failed','cancelled'].includes(state);
@@ -22,10 +22,11 @@ export function BeeperRepliesScreen(){
 function Replies({owner,current}:{owner:string;current:()=>boolean}){
  const r=roles(getColors(useTheme().scheme)),live=useRef(true),currentRef=useRef(current);currentRef.current=current;useLayoutEffect(()=>()=>{live.current=false;},[]);
  const valid=useCallback(()=>live.current&&currentRef.current(),[]);
+ const [summaries,setSummaries]=useState<Awaited<ReturnType<typeof listSendSummaries>>>([]);
  const [grants,setGrants]=useState<Grant[]|null>(null),[selected,setSelected]=useState(''),[wire,setWire]=useState(''),[draft,setDraft]=useState({route:'',text:''}),[operation,setOperation]=useState<Operation|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const selectedRef=useRef(selected);selectedRef.current=selected;const pending=useRef(false),opRef=useRef(operation);opRef.current=operation;
  const text=draft.route===selected?draft.text:'';const setText=(value:string)=>setDraft({route:selectedRef.current,text:value});
- const load=useCallback(async()=>{if(Platform.OS==='web'||!valid())return;try{const value=await listWriteGrants(owner);if(valid()){setGrants(value);setSelected(previous=>value.some(g=>g.connectionId===previous)?previous:value[0]?.connectionId??'');}}catch{if(valid())setError('Approve a write grant on your paired Mac and native device before replying.');}},[owner,valid]);
+ const load=useCallback(async()=>{if(Platform.OS==='web'||!valid())return;try{const [value,local]=await Promise.all([listWriteGrants(owner),listSendSummaries(owner)]);if(valid()){setGrants(value);setSummaries(local);setSelected(previous=>value.some(g=>g.connectionId===previous)?previous:value[0]?.connectionId??'');}}catch{if(valid())setError('Approve a write grant on your paired Mac and native device before replying.');}},[owner,valid]);
  useFocusEffect(useCallback(()=>{live.current=true;void load();return()=>{live.current=false;};},[load]));
  const grant=grants?.find(g=>g.connectionId===selected),scope=useRef(grant);scope.current=grant;
  const visibleOperation=operation?.connectionId===selected&&operation.chatKey===grant?.chatKey?operation:null;opRef.current=visibleOperation;
@@ -85,6 +86,7 @@ function Replies({owner,current}:{owner:string;current:()=>boolean}){
    {grants===null&&!error&&<ActivityIndicator accessibilityLabel="Loading approved write grants" color={r.accent}/>}
    {grants?.length===0&&<Text style={[type.body,{color:r.textMeta}]}>No active write grant on this device. Approving a read-only source chat does not enable replies.</Text>}
    {grants?.map(g=><Card key={g.connectionId} padding="none"><ListRow title={g.title} subtitle={`WhatsApp · Mac ${g.machineKey.slice(0,12)}… · expires ${new Date(g.expiresAt).toLocaleString()}`} trailing={<Chip label={selected===g.connectionId?'Selected':'Select'}/>} onPress={()=>{if(!busy){setError('');setSelected(g.connectionId);}}}/></Card>)}
+   {summaries.filter(item=>!terminal(item.state)&&!grants?.some(g=>g.connectionId===item.connectionId)).map(item=><Card key={item.operationId}><Text accessibilityRole="header" style={[type.title,{color:r.text}]}>{item.state==='prepared'?'Unsubmitted reply — approval unavailable':label(item.state)}</Text><Text style={[type.body,{color:r.textMeta}]}>{`Original operation ${item.operationId.slice(0,12)}… is preserved. Its target approval is expired or unavailable. Review it on the original Mac; no new send is authorized here.`}</Text></Card>)}
    {grant&&<>
     <Button label="Reconnect private relay" variant="ghost" loading={busy} onPress={()=>{void action(async()=>{const target=scope.current;if(!target)return;const {title:_title,chatType:_chatType,network:_network,pendingOperationId:_pending,...offer}=target;await api.approveBeeperWriteConnection(offer);});}}/>
 

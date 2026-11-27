@@ -418,3 +418,19 @@ export async function recordSendReceipt(account: string, id: string, wire: strin
     return status(id, next);
   });
 }
+
+/** Passive owner-local metadata only. Expired/missing grants cannot make an
+ * unresolved send disappear, and this path never loads keys, signs or submits. */
+export async function listSendSummaries(account: string) {
+  await signedIn(account);
+  const values: Array<ReturnType<typeof status> & { intentUntil: number }> = [];
+  for (const key of await AsyncStorage.getAllKeys()) {
+    if (!key.startsWith(prefix + 'op.') || !key.endsWith('.box')) continue;
+    const id = key.slice((prefix + 'op.').length, -4);
+    if (!isHex(id,48)) continue;
+    try { const op = await owned(account,id); values.push({...status(id,op),intentUntil:op.until}); } catch { /* Another owner or an incomplete local write. */ }
+  }
+  await signedIn(account);
+  const sorted=values.sort((a,b)=>b.intentUntil-a.intentUntil);
+  return [...sorted.filter(item=>!done(item.state)),...sorted.filter(item=>done(item.state)).slice(0,40)];
+}

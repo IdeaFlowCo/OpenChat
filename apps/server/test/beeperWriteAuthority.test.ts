@@ -18,6 +18,7 @@ import {
 import { sealReadEnvelope } from '../../mobile/src/services/beeper/readProtocol.mjs';
 import {
   getSendStatus,
+  listSendSummaries,
   getSendDisplay,
   resumeSubmittedSend,
   disableWriteGrant,
@@ -527,4 +528,10 @@ it('serializes a discard racing first submission and preserves attempted and pen
   const discard = cancelPreparedSend('owner', other.op);
   await expect(markSubmitAttempt('owner', other.op)).rejects.toThrow();
   expect((await discard).state).toBe('cancelled');
+});
+
+it('retains passive owner-local unresolved metadata after grant loss and refuses another account',async()=>{
+ const f=await grant(),op=id();await prepareSend('owner',f.route,f.chatKey,{operationId:op,text:'private draft'});await markSubmitAttempt('owner',op);
+ await disableWriteGrant('owner',f.route);const summaries=await listSendSummaries('owner');expect(summaries).toEqual([expect.objectContaining({operationId:op,state:'submitted'})]);expect(JSON.stringify(summaries)).not.toContain('private draft');expect(JSON.stringify(summaries)).not.toContain('secret');
+ local.account='other';expect(await listSendSummaries('other')).toEqual([]);
 });
