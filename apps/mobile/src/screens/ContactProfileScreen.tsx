@@ -5,8 +5,9 @@ import { PublishedAsks } from '../components/PublishedAsks';
  * also supports people with no conversation; it does not create a DM.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { nanoid } from 'nanoid/non-secure';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useChat } from '../contexts/ChatContext';
@@ -42,7 +43,7 @@ function relativeLastSeen(iso: string | undefined): string {
 export function ContactProfileScreen() {
   const navigation = useNavigation<NavProp<'ContactProfile'>>();
   const route = useRoute<RouteProps<'ContactProfile'>>();
-  const { userId, exactEmail } = route.params;
+  const { userId, exactEmail, askContact } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const r = roles(c);
@@ -97,6 +98,41 @@ export function ContactProfileScreen() {
     } catch (error) {
       setNameError(error instanceof Error ? error.message : 'Could not save private name.');
     } finally { setNameBusy(false); }
+  };
+  const [askingContact, setAskingContact] = useState(askContact === true);
+  const [question, setQuestion] = useState('');
+  const [askError, setAskError] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+  const pendingAsk = useRef<{ contactId: string; text: string; id: string } | null>(null);
+  const sendingAsk = useRef(false);
+  useEffect(() => {
+    setAskingContact(askContact === true);
+    setQuestion('');
+    setAskError('');
+  }, [userId, askContact]);
+
+  const sendContactAsk = async () => {
+    const text = question.trim();
+    if (!text || sendingAsk.current) return;
+    sendingAsk.current = true;
+    setAskBusy(true);
+    setAskError('');
+    if (pendingAsk.current?.contactId !== userId || pendingAsk.current.text !== text) {
+      pendingAsk.current = { contactId: userId, text, id: nanoid() };
+    }
+    try {
+      const { conversationId } = await api.askContactAgent({ contactId: userId, text, clientRequestId: pendingAsk.current.id });
+      pendingAsk.current = null;
+      setQuestion('');
+      setAskingContact(false);
+      await refreshConversations();
+      navigation.navigate('Chat', { conversationId, lane: 'context' });
+    } catch (error) {
+      setAskError(error instanceof Error ? error.message : 'Could not send the request.');
+    } finally {
+      sendingAsk.current = false;
+      setAskBusy(false);
+    }
   };
   const pres = presence.get(userId);
 
@@ -240,6 +276,33 @@ export function ContactProfileScreen() {
           }}
           onAskAgent={canSetPrivateName ? () => navigation.navigate('AgentOverlay', { context: { kind: 'person', id: userId, label: displayName, includePrivate: true } }) : undefined}
         />
+      )}
+
+      {canSetPrivateName && (
+        <Card>
+          <Button label={`Ask ${displayName}’s agent`} variant="secondary" onPress={() => setAskingContact(true)} />
+          {askingContact && (
+            <View style={styles.nameEditor}>
+              <Text style={[type.body, { color: r.textSecondary }]}>
+                Your question and any reply appear in the Stream for your direct chat with {displayName}.
+              </Text>
+              <TextInput
+                accessibilityLabel="Question for contact’s agent"
+                value={question}
+                onChangeText={setQuestion}
+                editable={!askBusy}
+                maxLength={20000}
+                multiline
+                style={[styles.input, { color: r.text, backgroundColor: r.input, borderColor: r.line }]}
+              />
+              <View style={styles.inlineButtons}>
+                <Button label={askBusy ? 'Sending…' : 'Send to agent'} disabled={askBusy || !question.trim()} onPress={() => void sendContactAsk()} />
+                <Button label="Cancel" variant="ghost" disabled={askBusy} onPress={() => setAskingContact(false)} />
+              </View>
+              {!!askError && <Text accessibilityRole="alert" style={[type.meta, { color: r.danger }]}>{askError}</Text>}
+            </View>
+          )}
+        </Card>
       )}
 
       {links.length > 0 && (

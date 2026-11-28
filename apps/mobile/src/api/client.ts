@@ -1164,6 +1164,10 @@ export const api = {
 
   getContextAgentPreferences: (keyId: string) => request<{ enabled: boolean }>(`/api/chat/context-agent/preferences?keyId=${encodeURIComponent(keyId)}`, { expireAuthOnForbidden: false }),
   setContextAgentPreferences: (keyId: string, enabled: boolean) => request<{ enabled: boolean }>('/api/chat/context-agent/preferences', { method: 'PUT', body: JSON.stringify({ keyId, enabled }), expireAuthOnForbidden: false }),
+  askContactAgent: (input: { contactId: string; text: string; clientRequestId: string }) =>
+    request<{ conversationId: string; post: ContextPost; queued: number }>('/api/chat/context-agent/ask-contact', {
+      method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false,
+    }),
   askContextAgents: (conversationId: string, postId: string) =>
     request<{ queued: number; available: number }>(`/api/chat/conversations/${conversationId}/context/${postId}/ask-agents`, { method: 'POST' }),
   reportContextPost: (conversationId: string, postId: string, reason: string) =>

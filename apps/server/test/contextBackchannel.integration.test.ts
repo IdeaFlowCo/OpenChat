@@ -1,7 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
 import { createContextPost, updateContextPost, deleteContextPost, listContextPosts, reportContextPost } from '../src/services/contextLane.js';
 import { contextAgentPreference, askContextAgents, listContextAgentRequests, respondToContextAgentRequest } from '../src/services/contextAgentRequests.js';
+const database = vi.hoisted(() => ({ driver: undefined as Driver | undefined }));
+vi.mock('../src/db.js', () => ({ getDriver: () => database.driver }));
+import contextRoutes from '../src/routes/context.js';
+import keyRoutes from '../src/routes/agentKeys.js';
+
 const integration = process.env.NEO4J_TEST_URI ? describe.sequential : describe.skip;
 integration('quiet Context back-channel with real Neo4j', () => {
   let driver: Driver;
@@ -119,4 +127,76 @@ integration('quiet Context back-channel with real Neo4j', () => {
     await run(`CREATE (:Message {id:$id,conversationId:$room,text:'Normal delivery control'})`,{id:`${prefix}-control`,room});
     expect(Number((await run(`MATCH (m:Message {conversationId:$room}) RETURN count(m) AS n`,{room})).records[0].get('n'))).toBe(1);
   });
+  it('queues only the selected direct contact and replies quietly in that Stream', async () => {
+    database.driver = driver;
+    const direct = `${prefix}-direct`, senderKey = `${prefix}-sender-key`;
+    await run(`MATCH (a:User {id:$a}), (b:User {id:$b})
+      CREATE (c:Conversation {id:$direct,type:'direct',lastMessagePreview:'before'})
+      CREATE (a)-[:PARTICIPATES_IN {lastReadAt:'before'}]->(c), (b)-[:PARTICIPATES_IN]->(c)
+      CREATE (:AgentKey {id:$senderKey,ownerUserId:$a,scopes:['read','write'],contextRequestsEnabled:true})
+      WITH b MATCH (k:AgentKey {id:$key}) SET k.revokedAt=null,k.scopes=['read','write'],k.contextRequestsEnabled=false`,
+    { a, b, direct, key, senderKey });
+    const secret = 'isolated-context-test-jwt';
+    vi.stubEnv('JWT_SECRET', secret);
+    vi.stubEnv('OPENCHAT_CONTEXT_LANE', 'true');
+    vi.stubEnv('OC_KEY_ENCRYPTION_SECRET', '49'.repeat(32));
+    const app = express();
+    app.use(express.json());
+    app.use('/api/chat', contextRoutes);
+    app.use('/api/agent-keys', keyRoutes);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const token = (userId: string) => jwt.sign({ userId, email: 'fixture@example.test' }, secret);
+    const request = async (path: string, credential: string, body?: unknown, method = 'POST') => {
+      const response = await fetch(`${base}${path}`, {
+        method, headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const context = '/api/chat/context-agent';
+    let receivingKeyId: string | undefined;
+    try {
+      const askBody = (id: string) => ({ contactId: b, text: 'Shared question', clientRequestId: id });
+      const ask = (id: string) => request(`${context}/ask-contact`, token(a), askBody(id));
+      expect((await ask('no-agent')).status).toBe(409);
+      expect((await session(s => listContextPosts(s, a, direct))).posts).toEqual([]);
+      const created = await request('/api/agent-keys', token(b), { name: 'Hermes', scopes: ['read', 'write'] });
+      expect(created.status).toBe(201);
+      receivingKeyId = created.body.id;
+      const receivingKey = created.body.key as string;
+      expect((await request(`${context}/preferences`, receivingKey, { enabled: true }, 'PUT')).body).toEqual({ enabled: true });
+      expect((await request(`${context}/ask-contact`, receivingKey, askBody('agent-initiated'))).status).toBe(403);
+      await run(`MATCH (a:User {id:$a}), (b:User {id:$b}) CREATE (a)-[:BLOCKED]->(b)`, { a, b });
+      expect((await ask('blocked')).status).toBe(404);
+      await run(`MATCH (:User {id:$a})-[r:BLOCKED]->(:User {id:$b}) DELETE r`, { a, b });
+      const results = await Promise.all([ask('same-request'), ask('same-request')]);
+      expect(results.map(result => result.status)).toEqual([200, 200]);
+      expect(results.map(result => result.body.queued).sort()).toEqual([0, 1]);
+      const post = results[0].body.post;
+      expect(results[1].body.post.id).toBe(post.id);
+      expect(results[0].body.conversationId).toBe(direct);
+      expect((await session(s => listContextAgentRequests(s, a, senderKey))).requests).toEqual([]);
+      expect((await request(`${context}/requests`, token(b), undefined, 'GET')).status).toBe(403);
+      const inbox = await request(`${context}/requests`, receivingKey, undefined, 'GET');
+      const [incoming] = inbox.body.requests;
+      expect(inbox.body.requests).toHaveLength(1);
+      expect(incoming).toMatchObject({ postId: post.id, conversationId: direct, text: 'Shared question' });
+      const response = await request(`${context}/requests/${incoming.id}/respond`, receivingKey, { text: 'Shared answer' });
+      expect(response.body.post).toMatchObject({ replyToId:post.id, agent:{ id:receivingKeyId, name:'Hermes' }, author:{ id:b } });
+      expect((await session(s => listContextPosts(s, a, direct))).posts.map(item => item.id)).toEqual([response.body.post.id, post.id]);
+      const state = await run(`MATCH (:User {id:$a})-[p:PARTICIPATES_IN]->(c:Conversation {id:$direct})
+        RETURN p.lastReadAt AS readAt,c.lastMessagePreview AS preview,
+        COUNT { MATCH (:Message {conversationId:$direct}) } AS messages`, { a, direct });
+      expect(state.records[0].get('readAt')).toBe('before');
+      expect(state.records[0].get('preview')).toBe('before');
+      expect(state.records[0].get('messages').toNumber()).toBe(0);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      vi.unstubAllEnvs();
+      await run(`MATCH (n) WHERE n.conversationId=$direct OR n.id=$receivingKeyId DETACH DELETE n`,
+        { direct, receivingKeyId: receivingKeyId ?? null });
+    }
+  });
+
 });

@@ -12,7 +12,7 @@ import {
   ContextLaneError
 } from '../services/contextLane.js';
 
-import { contextAgentPreference, askContextAgents, listContextAgentRequests, respondToContextAgentRequest } from '../services/contextAgentRequests.js';
+import { contextAgentPreference, askContactAgent, askContextAgents, listContextAgentRequests, respondToContextAgentRequest } from '../services/contextAgentRequests.js';
 
 const router = Router();
 
@@ -205,6 +205,11 @@ router.put('/context-agent/preferences', (req, res) => agentRequestRoute(req, re
 }));
 router.post('/conversations/:conversationId/context/:postId/ask-agents', (req, res) => agentRequestRoute(req, res, session =>
   askContextAgents(session, req.user!.userId, String(req.params.conversationId), String(req.params.postId), req.agentKeyId, req.agentScopes)));
+router.post('/context-agent/ask-contact', (req, res) => agentRequestRoute(req, res, session => {
+  if (req.agentKeyId || req.connectorDelegation || req.user?.embedded || getConnectorPrincipal(req)) throw new ContextLaneError(403, 'Use your signed-in OpenChat account');
+  const { contactId, text, clientRequestId } = req.body ?? {};
+  return askContactAgent(session, req.user!.userId, contactId, text, clientRequestId);
+}));
 router.get('/context-agent/requests', (req, res) => agentRequestRoute(req, res, session =>
   listContextAgentRequests(session, req.user!.userId, req.agentKeyId!)));
 router.post('/context-agent/requests/:requestId/respond', (req, res) => agentRequestRoute(req, res, session => {

@@ -60,7 +60,7 @@ export type RootStackParamList = {
   /** Forward picker — select conversation to forward a message into (OpenChat-hhc). */
   ForwardPicker: { messageId: string };
   /** Contact profile — chat header, Friends, People directory, or contact search. */
-  ContactProfile: { userId: string; exactEmail?: string };
+  ContactProfile: { userId: string; exactEmail?: string; askContact?: boolean };
   /** One of your own saved companies, ideas, projects or people, with who is linked to it. */
   PrivateThing: { thingId: string };
   /** People whose catch-up date has passed. */
@@ -110,7 +110,7 @@ export type AsksStackParamList = {
   StoryViewer: { story: FeedStory };
   SocialReview: undefined;
   /** An asker from the people-asks section: an OpenChat person, or a saved person, company, project or idea. */
-  ContactProfile: { userId: string; exactEmail?: string };
+  ContactProfile: { userId: string; exactEmail?: string; askContact?: boolean };
   PrivateThing: { thingId: string };
 };
 

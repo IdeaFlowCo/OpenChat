@@ -535,6 +535,21 @@ describe('private direct-chat header labels', () => {
 });
 
 
+it.each(['web', 'ios', 'android'])('shows the contact-agent door only for a direct human chat on %s', async platform => {
+  mocks.platform = platform;
+  const findDoor = () => screen!.root.findAllByType('TouchableOpacity').find(n => n.props.accessibilityLabel === 'Ask Alice’s agent');
+  await render();
+  expect(findDoor()).toBeUndefined();
+  mocks.chat.conversations[0].type = 'direct';
+  mocks.chat.conversations[0].title = undefined;
+  await render();
+  const door = findDoor();
+  expect(door).toBeDefined();
+  await act(async () => door!.props.onPress());
+  expect(mocks.navigation.navigate).toHaveBeenCalledWith('ContactProfile', { userId: 'alice', askContact: true });
+  expect(mocks.chat.sendMessageToConversation).not.toHaveBeenCalled();
+});
+
 describe('desktop composer input', () => {
   function key(flags: Record<string, unknown> = {}) {
     return { key: 'Enter', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, repeat: false,

@@ -1,8 +1,9 @@
 import { enqueueContextWebhook } from './contextWebhooks.js';
-import { Session } from 'neo4j-driver';
+import { Session, type ManagedTransaction } from 'neo4j-driver';
 import { nanoid } from 'nanoid';
 import { acquireContextAclLocks, checkContextWriteAccess } from './contextAccess.js';
 import { enqueueHostedContext, isHostedContextAvailable } from './contextHosted.js';
+import { DirectConversationNotAllowedError, ensureDirectConversationInTransaction } from './directConversation.js';
 import { ContextLaneError, createContextPost } from './contextLane.js';
 
 // Explicit requests: external agents poll; opted-in hosted agents generate owner-private drafts.
@@ -51,10 +52,10 @@ const recipientQuery = `MATCH (requester:User {id:$userId})-[:PARTICIPATES_IN]->
         CASE WHEN $hostedAvailable AND owner.contextHostedEnabled=true THEN 'hosted' ELSE 'key' END AS recipientType,
         coalesce(owner.contextHostedGeneration,0) AS generation,k.id AS keyId ORDER BY owner.id LIMIT 10`;
 
-export async function askContextAgents(session: Session, userId: string, conversationId: string, postId: string, agentKeyId?: string, agentScopes?: string[]) {
+export async function askContextAgents(session: Session, userId: string, conversationId: string, postId: string, agentKeyId?: string, agentScopes?: string[], targetOwnerId?: string) {
   return session.executeWrite(async tx => {
     const candidates = await tx.run(recipientQuery,
-      { userId, conversationId, agentKeyId: agentKeyId || null, now:new Date().toISOString(), hostedAvailable:isHostedContextAvailable(), ownerIds:null });
+      { userId, conversationId, agentKeyId: agentKeyId || null, now:new Date().toISOString(), hostedAvailable:isHostedContextAvailable(), ownerIds:targetOwnerId ? [targetOwnerId] : null });
     const ownerIds = candidates.records.map(r => r.get('ownerId') as string);
     await acquireContextAclLocks(tx, { userIds: [userId, ...ownerIds], conversationId, agentKeyId });
     if (!await checkContextWriteAccess(tx, userId, conversationId, agentKeyId, agentScopes)) throw new ContextLaneError(403, 'Not authorized');
@@ -65,7 +66,9 @@ export async function askContextAgents(session: Session, userId: string, convers
     const revision = source.records[0].get('revision');
     const recipients = await tx.run(recipientQuery,
       { userId, conversationId, agentKeyId: agentKeyId || null, now, hostedAvailable:isHostedContextAvailable(), ownerIds });
-    if (!recipients.records.length) throw new ContextLaneError(409, 'No agents in this conversation have enabled Context requests');
+    if (!recipients.records.length) throw new ContextLaneError(409, targetOwnerId
+      ? 'This contact’s agent is unavailable for Context requests'
+      : 'No agents in this conversation have enabled Context requests');
     // One request per owner/source revision, even after changing receiver or hosted preference.
     // The conversation lock serializes concurrent Ask actions; old requests are never reassigned.
     let queued = 0;
@@ -90,6 +93,37 @@ export async function askContextAgents(session: Session, userId: string, convers
       queued++;
     }
     return { queued, available: recipients.records.length };
+  });
+}
+
+export async function askContactAgent(session: Session, userId: string, contactId: string, text: string, clientRequestId: string) {
+  if (typeof contactId !== 'string' || !contactId || contactId === userId) {
+    throw new ContextLaneError(400, 'Select another contact');
+  }
+  return session.executeWrite(async tx => {
+    await acquireContextAclLocks(tx, { userIds: [userId, contactId] });
+    const contact = await tx.run(`MATCH (u:User {id:$contactId}) WHERE NOT coalesce(u.isBot,false) RETURN u.id`, { contactId });
+    if (!contact.records.length) throw new ContextLaneError(404, 'Contact unavailable');
+    let conversationId: string;
+    try {
+      const { conversation } = await ensureDirectConversationInTransaction(tx, userId, contactId);
+      conversationId = conversation.id as string;
+    } catch (error) {
+      if (error instanceof DirectConversationNotAllowedError) throw new ContextLaneError(404, 'Contact unavailable');
+      throw error;
+    }
+
+    // An unavailable recipient rolls back the source post as well as the request.
+    const adapter = { executeWrite: (run: (transaction: ManagedTransaction) => unknown) => run(tx) } as Session;
+    const post = await createContextPost(adapter, userId, conversationId, {
+      text, kind: 'ask', clientRequestId: typeof clientRequestId === 'string' && clientRequestId.trim() && clientRequestId.length <= 160
+        ? `contact-agent:${clientRequestId}` : '',
+    });
+    const existing = await tx.run(`MATCH (r:ContextAgentRequest {postId:$postId,ownerUserId:$contactId,requesterId:$userId})
+      RETURN r.id LIMIT 1`, { postId: post.id, contactId, userId });
+    if (existing.records.length) return { conversationId, post, queued: 0 };
+    const { queued } = await askContextAgents(adapter, userId, conversationId, post.id, undefined, undefined, contactId);
+    return { conversationId, post, queued };
   });
 }
 
