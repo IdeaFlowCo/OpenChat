@@ -806,3 +806,15 @@ describe('community announcements composer', () => {
     expect(renderedText()).toContain('Only community admins can post announcements.');
   });
 });
+
+it.each(['web', 'ios', 'android'])('keeps a pasted URL in the existing message composer on %s', async platform => {
+  mocks.platform = platform;
+  const url = 'https://example.test/policy?reference=typed#anchor';
+  await render();
+  await act(async () => screen!.root.findByType('TextInput').props.onChangeText(url));
+  expect(screen!.root.findByType('TextInput').props.value).toBe(url);
+  expect(mocks.chat.sendMessageToConversation).not.toHaveBeenCalled();
+  const send = screen!.root.find(node => node.type === 'TouchableOpacity' && node.props.accessibilityLabel === 'Send message');
+  await act(async () => { await send.props.onPress(); });
+  expect(mocks.chat.sendMessageToConversation).toHaveBeenCalledExactlyOnceWith('sailing', url, undefined, undefined, undefined, { assistantScope: 'universal' });
+});

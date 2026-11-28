@@ -3,17 +3,19 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   navigation: { navigate: vi.fn(), replace: vi.fn() }, createConversation: vi.fn(), getContacts: vi.fn(), listFriends: vi.fn(),
+  platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default },
+  ask: vi.fn(), review: vi.fn(), send: vi.fn(), refresh: vi.fn(),
   conversations: [] as any[], listBlocked: vi.fn(),
 }));
 vi.mock('react-native', () => ({
-  Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
-  ActivityIndicator: 'ActivityIndicator', Alert: { alert: vi.fn() }, Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', KeyboardAvoidingView: 'KeyboardAvoidingView',
+  Platform: mocks.platform, StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
+  ActivityIndicator: 'ActivityIndicator', Alert: { alert: vi.fn() }, Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView', KeyboardAvoidingView: 'KeyboardAvoidingView',
   FlatList: ({ data, renderItem, ListEmptyComponent }: any) => React.createElement('FlatList', {}, data?.length ? data.map((item: any, index: number) => React.createElement(React.Fragment, { key: index }, renderItem({ item, index }))) : ListEmptyComponent),
 }));
 vi.mock('@react-navigation/native', () => ({ useNavigation: () => mocks.navigation }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me', openUserDirectoryEnabled: true }, conversations: mocks.conversations, presence: new Map(), createConversation: mocks.createConversation }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.getContacts, listFriends: mocks.listFriends, listBlocked: mocks.listBlocked } }));
+vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({ currentUser: { userId: 'me', openUserDirectoryEnabled: true }, conversations: mocks.conversations, presence: new Map(), createConversation: mocks.createConversation, refreshConversations: mocks.refresh }) }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContacts: mocks.getContacts, listFriends: mocks.listFriends, listBlocked: mocks.listBlocked, askAboutWebsite: mocks.ask, reviewWebsiteMessage: mocks.review, sendWebsiteMessage: mocks.send } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
 vi.mock('../../mobile/src/components/YouBadge', () => ({ YouBadge: () => null }));
@@ -26,7 +28,7 @@ const button = (label: string) => root!.root.findAllByType('TouchableOpacity').f
 const dm = (id: string, name: string, at: string) => ({ id: `c-${id}`, type: 'direct', lastMessageAt: at, participants: [{ user: { id: 'me', name: 'Me' } }, { user: { id, name } }] });
 
 beforeEach(() => {
-  vi.clearAllMocks(); vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.clearAllMocks(); mocks.platform.OS = 'ios'; vi.useFakeTimers(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   mocks.conversations = [dm('hq', 'Harrison Qian', '2026-10-08T00:00:00Z'), dm('cl', 'Claire', '2026-10-09T00:00:00Z')];
   mocks.listFriends.mockResolvedValue({ friends: [{ userId: 'mg', user: { id: 'mg', name: 'Michael G' }, state: 'friends' }], incoming: [], outgoing: [] });
   mocks.getContacts.mockReturnValue(new Promise(() => {})); // the directory never answers
@@ -85,4 +87,33 @@ describe('New message (OpenChat-eo3n.2)', () => {
     expect(texts()).not.toContain('Claire');
     expect(texts()).toContain('Harrison Qian');
   });
+});
+
+it.each(['web', 'ios', 'android'])('keeps website paste local, reads on ask and sends only after review on %s', async platform => {
+  mocks.platform.OS = platform;
+  const quote = 'One checked bag is included in the fare.';
+  mocks.ask.mockResolvedValue({ status: 'answered', answer: 'A bag is included.', quote, url: 'https://airline.test/baggage' });
+  mocks.review.mockResolvedValue({ status: 'verified', name: 'Airline representative', domain: 'airline.test', host: 'airline.test', content: 'What is included?\n\nWebsite context: airline.test/baggage', token: 'reviewed' });
+  mocks.send.mockResolvedValue({ conversationId: 'site-chat' });
+  mocks.refresh.mockResolvedValue(undefined);
+  await act(async () => { root = create(React.createElement(NewConversationScreen)); });
+  const input = (label: string) => root!.root.findAllByType('TextInput').find(n => n.props.accessibilityLabel === label)!;
+  await act(async () => input('To').props.onChangeText('https://airline.test/baggage?secret=private#ref'));
+  await act(async () => vi.advanceTimersByTime(350));
+  expect(mocks.getContacts).toHaveBeenCalledTimes(1);
+  expect(mocks.ask).not.toHaveBeenCalled();
+  expect(mocks.review).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+  await act(async () => input('Question about this website').props.onChangeText('What is included?'));
+  await act(async () => button('Ask my agent')!.props.onPress());
+  expect(mocks.ask).toHaveBeenCalledWith({ url: 'https://airline.test/baggage', question: 'What is included?', excerpt: undefined });
+  expect(texts()).toContain('OpenChat Agent · Private answer');
+  expect(texts()).toContain(`“${quote}”`);
+  expect(mocks.send).not.toHaveBeenCalled();
+  await act(async () => button('Find official representative')!.props.onPress());
+  expect(texts()).toContain('To Airline representative · airline.test');
+  expect(mocks.send).not.toHaveBeenCalled();
+  await act(async () => button('Send to airline.test')!.props.onPress());
+  expect(mocks.send).toHaveBeenCalledWith('reviewed');
+  expect(mocks.navigation.replace).toHaveBeenCalledWith('Chat', { conversationId: 'site-chat' });
 });

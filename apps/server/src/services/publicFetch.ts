@@ -8,7 +8,7 @@ import { isIP, type TcpNetConnectOpts } from 'node:net';
 import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 import { isBlockedAddress } from './webhookDispatch.js';
 
-interface Options { timeoutMs: number; maxBytes: number; headers?: Record<string, string> }
+interface Options { timeoutMs: number; maxBytes: number; headers?: Record<string, string>; followRedirects?: boolean }
 export interface PublicResponse { status: number; headers: http.IncomingHttpHeaders; body: Buffer; url: string }
 
 async function resolveTarget(url: URL, signal: AbortSignal) {
@@ -87,7 +87,7 @@ export async function publicGet(rawUrl: string, options: Options): Promise<Publi
       const target = await resolveTarget(url, controller.signal);
       controller.signal.throwIfAborted();
       const response = await getHop(url, target, controller.signal, options);
-      if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.location) return response;
+      if (options.followRedirects === false || ![301, 302, 303, 307, 308].includes(response.status) || !response.headers.location) return response;
       url = new URL(response.headers.location, url);
     }
     throw new Error('Public fetch redirect limit exceeded');

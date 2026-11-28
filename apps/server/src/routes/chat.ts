@@ -1,3 +1,4 @@
+import { websiteRecipientRoutes, type ReviewedWebsiteSend } from './websiteRecipient.js';
 import { assertCommunityPosting, CommunityError } from '../services/communities.js';
 import { checkContextReadAccess, checkContextWriteAccess } from '../services/contextAccess.js';
 import messageContextRoutes from './messageContext.js';
@@ -1016,9 +1017,9 @@ router.patch('/conversations/:id/unread', requireAuth, async (req: Request, res:
 });
 
 // POST /api/chat/conversations/:id/messages - Send a message
-router.post('/conversations/:id/messages', resolveActor, async (req: Request, res: Response) => {
+async function sendChatMessage(req: Request, res: Response, reviewed?: ReviewedWebsiteSend) {
   const userId = req.user!.userId;
-  const { id: conversationId } = req.params;
+  const conversationId = reviewed?.conversationId ?? req.params.id;
   const {
     content: rawContent,
     text,
@@ -1030,12 +1031,12 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     assistantScope,
     emojiSize: rawEmojiSize,
     provenance: rawProvenance,
-  } = req.body;
+  } = reviewed ? { content: reviewed.content } : req.body;
   const content = rawContent ?? text;
   // A unified-connector principal must retry with the same clientRequestId; the
   // message id is derived from it so a retry never duplicates (OpenChat-vwgq.10).
   const connectorPrincipal = getConnectorPrincipal(req);
-  const idempotentSend = Boolean(req.connectorDelegation || connectorPrincipal);
+  const idempotentSend = Boolean(reviewed || req.connectorDelegation || connectorPrincipal);
   const provenance = parseMessageProvenance(rawProvenance);
   if (provenance === 'invalid') { res.status(400).json({ error: 'Invalid message provenance' }); return; }
   // Connector and delegated sends derive their id on the server; anyone else may offer one as a retry key.
@@ -1129,7 +1130,8 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     }
 
     if (check.records[0].get('blockedRelationship') === true) {
-      res.status(200).json({ success: true, dropped: true });
+      if (reviewed) res.status(409).json({ error: 'The website representative is unavailable.' });
+      else res.status(200).json({ success: true, dropped: true });
       return;
     }
 
@@ -1159,7 +1161,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     // so a WS send whose ack was lost, then retried over this REST fallback,
     // collapses to one row via MERGE instead of persisting a duplicate with a
     // fresh nanoid. See OpenChat-60y.
-    const messageId = req.connectorDelegation
+    const messageId = reviewed ? reviewed.messageId : req.connectorDelegation
       ? 'ocd_' + createHash('sha256').update(JSON.stringify([req.connectorDelegation.clientId,
         req.connectorDelegation.connectorGrantId, req.connectorDelegation.connectorUserId,
         req.connectorDelegation.openChatUserId, clientRequestId])).digest('hex')
@@ -1273,7 +1275,17 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
       emojiSize: hasAttachments ? null : emojiSize.size,
       preview,
     });
-    const result = announcement ? await withConversationLock(conversationId as string,async tx => {
+    const result = reviewed ? await session.executeWrite(async tx => {
+      await acquireContextAclLocks(tx, { userIds: [userId, reviewed.recipientId], conversationId: conversationId as string });
+      const allowed = await tx.run(`
+        MATCH (sender:User {id:$userId})-[:PARTICIPATES_IN]->(c:Conversation {id:$conversationId,type:'direct'})
+          <-[:PARTICIPATES_IN]-(recipient:User {id:$recipientId})-[:REPRESENTS_WEBSITE]->(:WebsiteBinding {id:$bindingId})
+        WHERE NOT (sender)-[:BLOCKED]-(recipient)
+          AND NOT EXISTS { MATCH (other:User)-[:PARTICIPATES_IN]->(c) WHERE NOT other.id IN [$userId,$recipientId] }
+        RETURN c.id`, { userId, conversationId, recipientId: reviewed.recipientId, bindingId: reviewed.bindingId });
+      if (!allowed.records.length) throw new InviteError('The website representative became unavailable.', 409);
+      return persist(tx);
+    }) : announcement ? await withConversationLock(conversationId as string,async tx => {
       await assertCommunityPosting(tx,userId,conversationId as string);
       if (!(await checkContextWriteAccess(tx,userId,conversationId as string,req.agentKeyId,req.agentScopes))) throw new InviteError('Conversation not found',404);
       return persist(tx);
@@ -1393,7 +1405,7 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
     if (!isVoiceOnly) {
       // "@agent" tag: the sender's own built-in agent answers about this thread (openchat-6zn).
       // Signed-in people only, once per stored message; a retried send never asks twice.
-      if (wasCreated) {
+      if (wasCreated && !reviewed) {
         void maybeTriggerThreadAgent({
           driver: getDriver(), io, senderId: userId, conversationId: conversationId as string, messageId: String(message.id), content: messageContent,
           human: isDirectHumanSession(req),
@@ -1418,7 +1430,10 @@ router.post('/conversations/:id/messages', resolveActor, async (req: Request, re
   } finally {
     await session.close();
   }
-});
+}
+
+router.post('/conversations/:id/messages', resolveActor, (req, res) => sendChatMessage(req, res));
+router.use('/website-recipient', websiteRecipientRoutes(sendChatMessage));
 
 // Minimal identity/relationship projection shared by first-party pickers.
 router.get('/people-suggestions', resolveActor, peopleSuggestions);

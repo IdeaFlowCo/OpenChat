@@ -168,6 +168,9 @@ export interface LinkPreview {
   fetchedAt: string;
 }
 
+export type WebsiteAnswer = { status: 'unreadable' | 'insufficient' } | { status: 'answered'; answer: string; quote: string; url?: string };
+export type WebsiteReview = { status: 'unverified' } | { status: 'verified'; name: string; domain: string; host: string; content: string; token: string };
+
 export interface Message {
   /** Local-only delivery state, removed when replaced by the server message. */
   _delivery?: 'queued' | 'sending' | 'failed';
@@ -1203,6 +1206,12 @@ export const api = {
     request<{ messages: Message[]; hasMore: boolean }>(
       `/api/chat/conversations/${conversationId}/messages?before=${encodeURIComponent(before)}&limit=${limit}`
     ),
+  askAboutWebsite: (input: { url: string | null; question: string; excerpt?: string }) =>
+    request<WebsiteAnswer>('/api/chat/website-recipient/ask', { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  reviewWebsiteMessage: (input: { url: string; question: string }) =>
+    request<WebsiteReview>('/api/chat/website-recipient/review', { method: 'POST', body: JSON.stringify(input), expireAuthOnForbidden: false }),
+  sendWebsiteMessage: (token: string) =>
+    request<Message>('/api/chat/website-recipient/send', { method: 'POST', body: JSON.stringify({ token, confirmed: true }), expireAuthOnForbidden: false }),
   sendMessage: (conversationId: string, content: string, attachments?: Attachment[], id?: string, replyToId?: string, emojiSize?: number | null, assistantScope?: 'conversation' | 'universal') =>
     timedRequest<Message | DroppedMessageSend>(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
