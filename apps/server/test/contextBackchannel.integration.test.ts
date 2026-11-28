@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import neo4j, { type Driver } from 'neo4j-driver';
 import { createContextPost, updateContextPost, deleteContextPost, listContextPosts, reportContextPost } from '../src/services/contextLane.js';
-import { contextAgentPreference, askContextAgents, listContextAgentRequests, respondToContextAgentRequest } from '../src/services/contextAgentRequests.js';
+import { contextAgentPreference, askContactAgent, askContextAgents, listContextAgentRequests, respondToContextAgentRequest } from '../src/services/contextAgentRequests.js';
 const integration = process.env.NEO4J_TEST_URI ? describe.sequential : describe.skip;
 integration('quiet Context back-channel with real Neo4j', () => {
   let driver: Driver;
@@ -119,4 +119,43 @@ integration('quiet Context back-channel with real Neo4j', () => {
     await run(`CREATE (:Message {id:$id,conversationId:$room,text:'Normal delivery control'})`,{id:`${prefix}-control`,room});
     expect(Number((await run(`MATCH (m:Message {conversationId:$room}) RETURN count(m) AS n`,{room})).records[0].get('n'))).toBe(1);
   });
+  it('queues only the selected direct contact and replies quietly in that Stream', async () => {
+    const direct = `${prefix}-direct`, senderKey = `${prefix}-sender-key`;
+    await run(`MATCH (a:User {id:$a}), (b:User {id:$b})
+      CREATE (c:Conversation {id:$direct,type:'direct',lastMessagePreview:'before'})
+      CREATE (a)-[:PARTICIPATES_IN {lastReadAt:'before'}]->(c), (b)-[:PARTICIPATES_IN]->(c)
+      CREATE (:AgentKey {id:$senderKey,ownerUserId:$a,scopes:['read','write'],contextRequestsEnabled:true})
+      WITH b MATCH (k:AgentKey {id:$key}) SET k.revokedAt=null,k.scopes=['read','write'],k.contextRequestsEnabled=false`,
+    { a, b, direct, key, senderKey });
+    try {
+      const ask = (id: string) => session(s => askContactAgent(s, a, b, 'Shared question', id));
+      await expect(ask('no-agent')).rejects.toMatchObject({ statusCode:409 });
+      expect((await session(s => listContextPosts(s, a, direct))).posts).toEqual([]);
+      await session(s => contextAgentPreference(s, b, key, true));
+      await run(`MATCH (a:User {id:$a}), (b:User {id:$b}) CREATE (a)-[:BLOCKED]->(b)`, { a, b });
+      await expect(ask('blocked')).rejects.toMatchObject({ statusCode:404 });
+      await run(`MATCH (:User {id:$a})-[r:BLOCKED]->(:User {id:$b}) DELETE r`, { a, b });
+      const results = await Promise.all([ask('same-request'), ask('same-request')]);
+      expect(results.map(result => result.queued).sort()).toEqual([0, 1]);
+      const post = results[0].post;
+      expect(results[1].post.id).toBe(post.id);
+      expect(results[0].conversationId).toBe(direct);
+      expect((await session(s => listContextAgentRequests(s, a, senderKey))).requests).toEqual([]);
+      const inbox = await session(s => listContextAgentRequests(s, b, key));
+      const request = inbox.requests.find(item => item.postId === post.id);
+      expect(request).toMatchObject({ conversationId:direct, text:'Shared question' });
+      const response = await session(s => respondToContextAgentRequest(s, b, key, scopes, request!.id, 'Shared answer'));
+      expect(response.post).toMatchObject({ replyToId:post.id, agent:{ id:key, name:'Hermes' }, author:{ id:b } });
+      expect((await session(s => listContextPosts(s, a, direct))).posts.map(item => item.id)).toEqual([response.post!.id, post.id]);
+      const state = await run(`MATCH (:User {id:$a})-[p:PARTICIPATES_IN]->(c:Conversation {id:$direct})
+        RETURN p.lastReadAt AS readAt,c.lastMessagePreview AS preview,
+        COUNT { MATCH (:Message {conversationId:$direct}) } AS messages`, { a, direct });
+      expect(state.records[0].get('readAt')).toBe('before');
+      expect(state.records[0].get('preview')).toBe('before');
+      expect(state.records[0].get('messages').toNumber()).toBe(0);
+    } finally {
+      await run(`MATCH (n) WHERE n.conversationId=$direct DETACH DELETE n`, { direct });
+    }
+  });
+
 });

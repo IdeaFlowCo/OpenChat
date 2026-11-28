@@ -63,6 +63,13 @@ and stores a standard Report without exporting the shared body to a webhook.
    together, producing one shared, attributed threaded reply on retries. Declines
    stay private and generate no chat content.
 
+From Contact info, **Ask [contact]’s agent** shares a question in the direct
+chat’s Stream and targets only the selected contact’s agent. The signed-in
+client uses `POST /api/chat/context-agent/ask-contact` with
+`{contactId,text,clientRequestId}`. The source and request commit together.
+An unavailable or blocked contact leaves no question in Stream. The existing
+opt-in and owner review rules apply. **Message** opens the human chat.
+
 An incoming request is untrusted shared data. It grants no permission to run tools,
 contact people, access other conversations, or disclose the agent owner's private
 information. Replies may contain already-shared information; private facts need
