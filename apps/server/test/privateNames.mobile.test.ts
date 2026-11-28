@@ -3,6 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   exactEmail: undefined as string | undefined, noConversation: false, userId: 'alice', targetId: 'bob', name: 'Official Bob', isBot: false,
+  askContact: false, ask: vi.fn(), createConversation: vi.fn(), refresh: vi.fn(),
   platform: { OS: 'ios', select: (values: any) => values.ios ?? values.default }, getProfile: vi.fn(), get: vi.fn(), set: vi.fn(), clear: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock('react-native', () => ({
@@ -10,16 +11,16 @@ vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', TouchableOpacity: 'TouchableOpacity', View: 'View', ScrollView: 'ScrollView',
   Alert: { alert: vi.fn() },
 }));
-vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId, exactEmail: mocks.exactEmail } }) }));
+vi.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mocks.navigate }), useRoute: () => ({ params: { userId: mocks.targetId, exactEmail: mocks.exactEmail, askContact: mocks.askContact } }) }));
 vi.mock('../../mobile/src/contexts/ChatContext', () => ({ useChat: () => ({
   currentUser: { userId: mocks.userId }, conversations: mocks.noConversation ? [] : [{ participants: [{ user: { id: mocks.targetId, name: mocks.name, isBot: mocks.isBot } }] }],
-  presence: new Map(), createConversation: vi.fn(), refreshConversations: vi.fn(),
+  presence: new Map(), createConversation: mocks.createConversation, refreshConversations: mocks.refresh,
 }) }));
 vi.mock('../../mobile/src/contexts/ThemeContext', () => ({ useTheme: () => ({ scheme: 'light' }) }));
-vi.mock('../../mobile/src/api/client', () => ({ api: { getContactProfile: mocks.getProfile, getPrivateName: mocks.get, setPrivateName: mocks.set, clearPrivateName: mocks.clear } }));
+vi.mock('../../mobile/src/api/client', () => ({ api: { getContactProfile: mocks.getProfile, askContactAgent: mocks.ask, getPrivateName: mocks.get, setPrivateName: mocks.set, clearPrivateName: mocks.clear } }));
 vi.mock('../../mobile/src/components/Avatar', () => ({ Avatar: () => null }));
 vi.mock('../../mobile/src/components/BotBadge', () => ({ BotBadge: () => null }));
-vi.mock('../../mobile/src/components/ProfileActions', () => ({ ProfileActions: () => null }));
+vi.mock('../../mobile/src/components/ProfileActions', () => ({ ProfileActions: ({ onMessage }: any) => React.createElement('TouchableOpacity', { onPress: onMessage }, React.createElement('Text', {}, 'Message')) }));
 vi.mock('../../mobile/src/components/AppIcon', () => ({ AppIcon: () => null }));
 // The asks list and the private card have their own suites. The private name row lives
 // inside the (collapsed) private card, so the stand-in renders just that row.
@@ -48,7 +49,7 @@ function button(label: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-  mocks.noConversation = false; mocks.exactEmail = undefined;
+  mocks.noConversation = false; mocks.exactEmail = undefined; mocks.askContact = false;
   mocks.getProfile.mockImplementation(async () => ({ id: mocks.targetId, name: mocks.name, isBot: mocks.isBot }));
   mocks.userId = 'alice'; mocks.targetId = 'bob'; mocks.name = 'Official Bob'; mocks.isBot = false;
   mocks.get.mockResolvedValue({ name: null });
@@ -149,4 +150,35 @@ it.each(['ios', 'web'])('uses search proof for no-conversation profile and alias
   await act(async () => button('Edit private name').props.onPress());
   await act(async () => button('Clear private name').props.onPress());
   expect(mocks.clear).toHaveBeenCalledWith('bob');
+});
+
+it.each(['web', 'ios', 'android'])('keeps contact-agent asks separate from Message and reuses retry IDs on %s', async platform => {
+  mocks.platform.OS = platform;
+  mocks.ask.mockRejectedValueOnce(new Error('Connection interrupted'));
+  mocks.ask.mockResolvedValueOnce({ conversationId: 'person-dm', queued: 0 });
+  mocks.createConversation.mockResolvedValue({ id: 'person-dm' });
+  mocks.refresh.mockResolvedValue(undefined);
+  await render();
+  await act(async () => button('Message').props.onPress());
+  expect(mocks.createConversation).toHaveBeenCalledWith(['bob'], { type: 'direct' });
+  expect(mocks.navigate).toHaveBeenLastCalledWith('Chat', { conversationId: 'person-dm' });
+  expect(mocks.ask).not.toHaveBeenCalled();
+  await act(async () => button('Ask Official Bob’s agent').props.onPress());
+  const input = root!.root.findAllByType('TextInput').find(n => n.props.accessibilityLabel === 'Question for contact’s agent')!;
+  await act(async () => input.props.onChangeText('Please check the shared plan'));
+  await act(async () => button('Send to agent').props.onPress());
+  expect(text()).toContain('Connection interrupted');
+  await act(async () => button('Send to agent').props.onPress());
+  expect(mocks.ask).toHaveBeenCalledTimes(2);
+  expect(mocks.ask.mock.calls[0][0]).toMatchObject({ contactId: 'bob', text: 'Please check the shared plan' });
+  expect(mocks.ask.mock.calls[0][0]).toEqual(mocks.ask.mock.calls[1][0]);
+  expect(mocks.createConversation).toHaveBeenCalledTimes(1);
+  expect(mocks.navigate).toHaveBeenLastCalledWith('Chat', { conversationId: 'person-dm', lane: 'context' });
+});
+
+it('opens the composer when launched from a DM', async () => {
+  mocks.askContact = true;
+  await render();
+  expect(root!.root.findAllByType('TextInput').some(n => n.props.accessibilityLabel === 'Question for contact’s agent')).toBe(true);
+  expect(mocks.ask).not.toHaveBeenCalled();
 });

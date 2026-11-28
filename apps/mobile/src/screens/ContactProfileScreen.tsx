@@ -43,7 +43,7 @@ function relativeLastSeen(iso: string | undefined): string {
 export function ContactProfileScreen() {
   const navigation = useNavigation<NavProp<'ContactProfile'>>();
   const route = useRoute<RouteProps<'ContactProfile'>>();
-  const { userId, exactEmail } = route.params;
+  const { userId, exactEmail, askContact } = route.params;
   const { scheme } = useTheme();
   const c = getColors(scheme);
   const r = roles(c);
@@ -99,17 +99,17 @@ export function ContactProfileScreen() {
       setNameError(error instanceof Error ? error.message : 'Could not save private name.');
     } finally { setNameBusy(false); }
   };
-  const [askingContact, setAskingContact] = useState(false);
+  const [askingContact, setAskingContact] = useState(askContact === true);
   const [question, setQuestion] = useState('');
   const [askError, setAskError] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const pendingAsk = useRef<{ contactId: string; text: string; id: string } | null>(null);
   const sendingAsk = useRef(false);
   useEffect(() => {
-    setAskingContact(false);
+    setAskingContact(askContact === true);
     setQuestion('');
     setAskError('');
-  }, [userId]);
+  }, [userId, askContact]);
 
   const sendContactAsk = async () => {
     const text = question.trim();

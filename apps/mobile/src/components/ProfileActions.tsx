@@ -79,7 +79,7 @@ export function ProfileActions({ userId, name, isBot, onMessage, onAskAgent }: {
           onPress={() => confirmAction('Cancel friend request?', `${name} will no longer see your request.`, 'Cancel request', () => void act('cancel'))} />}
         {state === 'friends' && <Tile icon="people" label="Friends" disabled={busy} accessibilityLabel={`Friends with ${name}. Remove friend`}
           onPress={() => confirmAction(`Remove ${name} as a friend?`, 'Your chats stay. You can add them again later.', 'Remove friend', () => void act('remove'))} />}
-        {onAskAgent && <Tile icon="sparkle" label="Ask agent" disabled={busy} onPress={onAskAgent} accessibilityLabel={`Ask agent about ${name}`} />}
+        {onAskAgent && <Tile icon="sparkle" label="Ask my agent" disabled={busy} onPress={onAskAgent} accessibilityLabel={`Ask my agent about ${name}`} />}
       </View>
       {error && <Text accessibilityRole="alert" style={[type.meta, { color: r.danger, textAlign: 'center' }]}>{error}</Text>}
     </View>

@@ -2118,7 +2118,14 @@ export function ChatScreen({
           </View>
         );
       })()}
-      <ConversationLaneSwitch activeLane={activeConversationLane} onChange={setActiveConversationLane} />
+      <ConversationLaneSwitch
+        activeLane={activeConversationLane}
+        onChange={setActiveConversationLane}
+        contactAgentAction={!isGroup && !isSelfDM && other?.id && !other.isBot ? {
+          label: `Ask ${privateName.name || headerTitle}’s agent`,
+          onPress: () => navigation.navigate('ContactProfile', { userId: other.id, askContact: true }),
+        } : undefined}
+      />
       {showAiDisclosure && <AiDisclosureBanner />}
       {activeConversationLane === 'chat' && <ChatTranslationBar key={conversationId} conversationId={conversationId} suggest={offerTranslation} />}
 

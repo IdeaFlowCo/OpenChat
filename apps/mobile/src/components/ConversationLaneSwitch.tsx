@@ -1,14 +1,16 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
+import { Button } from './ui';
 import { getColors } from '../theme/colors';
 
 interface Props {
   activeLane: 'chat' | 'context';
   onChange: (lane: 'chat' | 'context') => void;
+  contactAgentAction?: { label: string; onPress: () => void };
 }
 
-export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
+export function ConversationLaneSwitch({ activeLane, onChange, contactAgentAction }: Props) {
   const { scheme } = useTheme();
   const c = getColors(scheme);
 
@@ -35,6 +37,7 @@ export function ConversationLaneSwitch({ activeLane, onChange }: Props) {
           <Text style={[styles.label, { color: activeLane === 'context' ? c.textPrimary : c.textMetadata }]}>Stream</Text>
         </TouchableOpacity>
       </View>
+      {contactAgentAction && <Button size="sm" variant="ghost" {...contactAgentAction} />}
     </View>
   );
 }
