@@ -29,6 +29,8 @@ import { useChat } from '../contexts/ChatContext';
 import { getColors } from '../theme/colors';
 import { Avatar } from '../components/Avatar';
 import { BotBadge } from '../components/BotBadge';
+import { WebsiteRecipientDraft } from '../components/WebsiteRecipientDraft';
+import { websiteDraft } from '../utils/websiteDraft';
 import { YouBadge } from '../components/YouBadge';
 import { AppIcon } from '../components/AppIcon';
 import { Button, Chip, ListRow, SectionLabel } from '../components/ui';
@@ -55,7 +57,7 @@ export function NewConversationScreen() {
   const navigation = useNavigation<NavProp<'NewConversation'>>();
   const { scheme } = useTheme();
   const r = roles(getColors(scheme));
-  const { createConversation, currentUser, presence, conversations } = useChat();
+  const { createConversation, currentUser, presence, conversations, refreshConversations } = useChat();
   const [friendUsers, setFriendUsers] = useState<User[]>([]);
   const [blockedIds, setBlockedIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -84,9 +86,12 @@ export function NewConversationScreen() {
   const trimmedGroupTitle = groupTitle.trim();
   const canCreateGroup = selected.length > 0 || trimmedGroupTitle.length > 0;
 
-  const debounced = useDebounced(query, 300);
+  const website = mode === 'direct' ? websiteDraft(query) : null;
+  const isWebsite = website !== null;
+  const debounced = useDebounced(isWebsite ? '' : query, 300);
 
   useEffect(() => {
+    if (isWebsite || (mode === 'direct' && websiteDraft(debounced))) return;
     let cancelled = false;
     setLoading(true);
     api.getContacts(debounced || undefined, { limit: DIRECTORY_PAGE_SIZE, offset: 0 })
@@ -108,7 +113,7 @@ export function NewConversationScreen() {
       })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [debounced, currentUser?.openUserDirectoryEnabled]);
+  }, [debounced, mode, isWebsite, currentUser?.openUserDirectoryEnabled]);
 
   const loadMore = () => {
     if (
@@ -268,19 +273,20 @@ export function NewConversationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.top}>
+        {mode === 'direct' && <Text style={[type.label, { color: r.textMeta }]}>To</Text>}
         <TextInput
           style={[styles.search, { backgroundColor: r.input, color: r.text, borderColor: r.line }]}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search by name or exact email"
+          placeholder={mode === 'direct' ? 'Name, exact email, or website' : 'Search by name or exact email'}
           placeholderTextColor={r.decoration}
           autoCapitalize="none"
           autoCorrect={false}
-          accessibilityLabel="Search people"
+          accessibilityLabel={mode === 'direct' ? 'To' : 'Search people'}
         />
-        {mode === 'direct' ? (
+        {mode === 'direct' ? (!website && (
           <ListRow icon="people" title="New group" onPress={() => { setMode('group'); setSelected([]); }} style={styles.newGroup} />
-        ) : (
+        )) : (
           <View style={styles.groupHeader}>
             <View style={styles.groupHeaderRow}>
               <Text accessibilityRole="header" style={[type.title, { color: r.text }]}>New group</Text>
@@ -307,7 +313,11 @@ export function NewConversationScreen() {
         )}
       </View>
 
-      {searching && items.length === 0 ? (
+      {website ? (
+        <WebsiteRecipientDraft key={query} {...website} onSent={conversationId => {
+          void refreshConversations().finally(() => navigation.replace('Chat', { conversationId }));
+        }} />
+      ) : searching && items.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={r.accent} />
         </View>
